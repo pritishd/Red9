@@ -169,9 +169,7 @@ def getScriptEditorSelection():
 
 def Timer(func):
     '''
-    DECORATOR : DECORATOR : DECORATOR :
-    ----------------------------------
-    Simple timer function
+    DECORATOR : Simple timer function
     '''
     @wraps(func)
     def wrapper(*args, **kws):
@@ -205,10 +203,8 @@ def Timer(func):
 
 def runProfile(func):
     '''
-    DECORATOR : DECORATOR : DECORATOR :
-    ----------------------------------
-    run the profiler - only ever used when debugging /optimizing function call speeds.
-    visualize the data using 'runsnakerun' to view the profiles and debug
+    DECORATOR : run the profiler - only ever used when debugging /optimizing 
+    function call speeds.visualize the data using 'runsnakerun' to view the profiles and debug
     '''
     import cProfile
     from time import gmtime, strftime
@@ -226,10 +222,8 @@ def runProfile(func):
 
 def evalManager_DG(func):
     '''
-    DECORATOR : DECORATOR : DECORATOR :
-    ----------------------------------
-    simple decorator to call the evalManager_switch plugin and run the enclosed 
-    function in DG eval mode NOT parallel. 
+    DECORATOR : simple decorator to call the evalManager_switch plugin 
+    and run the enclosed function in DG eval mode NOT parallel. 
     
     .. note:: 
         Parallel EM mode is slow at evaluating time, DG is up to 3 times faster!
@@ -277,9 +271,7 @@ def evalManagerState(mode='off'):
 
 class AnimationContext(object):
     """
-    CONTEXT MANAGER : CONTEXT MANAGER :
-    ----------------------------------
-    Simple Context Manager for restoring Animation settings
+    CONTEXT MANAGER : Simple Context Manager for restoring Animation settings
     
     :param evalmanager: do we manage the evalManager in this context for Maya 2016 onwards
     :param time: do we manage the time and restore the original currentTime?
@@ -340,9 +332,7 @@ class AnimationContext(object):
     
 class undoContext(object):
     """
-    CONTEXT MANAGER : CONTEXT MANAGER :
-    ----------------------------------
-    Simple Context Manager for chunking the undoState
+    CONTEXT MANAGER : Simple Context Manager for chunking the undoState
     """
     def __init__(self, initialUndo=False, undoFuncCache=[], undoDepth=1):
         '''
@@ -359,7 +349,7 @@ class undoContext(object):
         :param undoFuncCache: only if initialUndo = True : functions to catch in the undo stack
         :param undoDepth: only if initialUndo = True : depth of the undo stack to go to
         
-        .. note ::
+        .. note::
             When adding funcs to this you CAN'T call the 'dc' command on any slider with a lambda func,
             it has to call a specific func to catch in the undoStack. See Red9_AnimationUtils.FilterCurves
             code for a live example of this setup.
@@ -389,16 +379,17 @@ class undoContext(object):
 
 class ProgressBarContext(object):
     '''
-    CONTEXT MANAGER : CONTEXT MANAGER :
-    ----------------------------------
-    Context manager to make it easier to wrap progressBars
+    CONTEXT MANAGER : Context manager to make it easier to wrap progressBars
+    
+    :param maxValue: max value used in the progress
+    :param interruptable: if the progress is interruptable / escapable
+    :param step: step used in the progress bar
+    :param ismain: if we use the main progressBar OR a progressWindow to view the progress
+    :param title: only valid if ismain=False, used as the progressUI window title
     
     >>> #Example of using this in code
     >>> 
-    >>> step=5
-    >>> progressBar=r9General.ProgressBarContext(1000)
-    >>> progressBar.setStep(step)
-    >>> count=0
+    >>> progressBar=r9General.ProgressBarContext(maxValue=1000, step=1)
     >>> 
     >>> #now do your code but increment and check the progress state
     >>> with progressBar:
@@ -406,12 +397,12 @@ class ProgressBarContext(object):
     >>>        if progressBar.isCanceled():
     >>>             print 'process cancelled'
     >>>             return
-    >>>         progressBar.setProgress(count)
-    >>>         count+=step
+    >>>         progressBar.updateProgress()
     
     '''
-    def __init__(self, maxValue=100, interruptable=True):
+    def __init__(self, maxValue=100, interruptable=True, step=1, ismain=True, title=''):
         self.disable=False
+        self.ismain=ismain
         if r9Setup.mayaIsBatch():
             self.disable=True
             return
@@ -420,28 +411,60 @@ class ProgressBarContext(object):
             raise ValueError("Max has to be greater than 0")
         self._maxValue = maxValue
         self._interruptable = interruptable
-        
         self._gMainProgressBar = mel.eval('$gmtmp = $gMainProgressBar')
+        self.title=title
+        self.step=step
                 
     def isCanceled(self):
         if not self.disable:
-            return cmds.progressBar(self._gMainProgressBar, query=True, isCancelled=True)
+            if self.ismain:
+                return cmds.progressBar(self._gMainProgressBar, query=True, isCancelled=True)
+            else:
+                return cmds.progressWindow(query=True, isCancelled=True)
 
     def setText(self, text):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, status=text)
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, status=text)
+            else:
+                cmds.progressWindow(edit=True, status=text)
 
     def setMaxValue(self, value):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, maxValue=int(value))
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, maxValue=int(value))
+            else:
+                cmds.progressWindow(edit=True, maxValue=int(value))
         
     def setStep(self, value):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, step=int(value))
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, step=int(value))
+            else:
+                cmds.progressWindow(edit=True, step=int(value))
     
     def setProgress(self, value):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, progress=int(value))
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, progress=int(value))
+            else:
+                cmds.progressWindow(edit=True, progress=int(value))
+    
+    def getProgress(self):
+        if not self.disable:
+            if self.ismain:
+                return cmds.progressBar(self._gMainProgressBar, q=True, progress=True) or  0
+            else:
+                return cmds.progressWindow(q=True, progress=True) or 0
+                
+    def updateProgress(self):
+        '''
+        more simplistic way to just update the progress. Previously we generate a
+        counter and used that with the setProgress() call, this is a far better way
+        to do it
+        '''
+        if not self.disable:
+            self.setProgress(self.getProgress() + self.step)
         
     def reset(self):
         if not self.disable:
@@ -450,27 +473,34 @@ class ProgressBarContext(object):
 
     def __enter__(self):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar,
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar,
                               edit=True,
                               beginProgress=True,
-                              step=1,
+                              step=self.step,
                               isInterruptable=self._interruptable,
                               maxValue=self._maxValue)
-    
+            else:
+                cmds.progressWindow(step=self.step,
+                                title=self.title,
+                                isInterruptable=self._interruptable,
+                                maxValue=self._maxValue)
+                
     def __exit__(self, exc_type, exc_value, traceback):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, endProgress=True)
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, endProgress=True)
+            else:
+                cmds.progressWindow(endProgress=True)
             if exc_type:
                 log.exception('%s : %s'%(exc_type, exc_value))
             del(self)
-            return False  # False so that the exceptiopn gets re-raised
+            return False  # False so that the exception gets re-raised
     
        
 class HIKContext(object):
     """
-    CONTEXT MANAGER : CONTEXT MANAGER :
-    ----------------------------------
-    Simple Context Manager for restoring HIK Animation settings and managing HIK callbacks
+    CONTEXT MANAGER : Simple Context Manager for restoring HIK Animation settings and managing HIK callbacks
     """
     def __init__(self, NodeList):
         self.objs=cmds.ls(sl=True, l=True)
@@ -509,9 +539,7 @@ class HIKContext(object):
     
 class SceneRestoreContext(object):
     """
-    CONTEXT MANAGER : CONTEXT MANAGER :
-    ----------------------------------
-    Simple Context Manager for restoring Scene Global settings
+    CONTEXT MANAGER : Simple Context Manager for restoring Scene Global settings
     
     Basically we store the state of all the modelPanels and timeLine
     setups. Think of it like this, you export a scene, file -new, then re-import it
@@ -891,13 +919,14 @@ def os_listFiles(folder, filters=[], byDate=False, fullPath=False):
     :param folder: folder to dir list
     :param filters: list of file extensions to filter for
     :param byData: sort the list by modified date, newest first!
+    :param fullPath: return either the fully matched path or just the files that match
     '''
     files = os.listdir(folder)
     filtered=[]
     if filters:
         for f in files:
             for flt in filters:
-                if f.lower().endswith(flt):
+                if f.lower().endswith(flt.lower()):
                     filtered.append(f)
         files=filtered
     if byDate and files:
