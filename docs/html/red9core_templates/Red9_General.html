@@ -203,6 +203,12 @@ The plugin call is registered back in the undoStack, cmds.evalmanager call is no
 </dd></dl>
 
 <dl class="function">
+<dt id="Red9.core.Red9_General.keepSelection">
+<code class="descname">keepSelection</code><span class="sig-paren">(</span><em>func</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_General.keepSelection" title="Permalink to this definition">¶</a></dt>
+<dd><p>DECORATOR: to keep scene selection as it was before a function or a method execution</p>
+</dd></dl>
+
+<dl class="function">
 <dt id="Red9.core.Red9_General.evalManagerState">
 <code class="descname">evalManagerState</code><span class="sig-paren">(</span><em>mode='off'</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_General.evalManagerState" title="Permalink to this definition">¶</a></dt>
 <dd><p>wrapper function for the evalManager so that it&#8217;s switching is recorded in 
@@ -294,10 +300,10 @@ code for a live example of this setup.</p>
 <span class="gp">&gt;&gt;&gt; </span>
 <span class="gp">&gt;&gt;&gt; </span><span class="c1">#now do your code but increment and check the progress state</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">progressBar</span><span class="p">:</span>
-<span class="gp">&gt;&gt;&gt; </span>    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">:</span><span class="mi">1000</span><span class="p">):</span>
-<span class="gp">&gt;&gt;&gt; </span>       <span class="k">if</span> <span class="n">progressBar</span><span class="o">.</span><span class="n">isCanceled</span><span class="p">():</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="mi">1000</span><span class="p">,</span><span class="mi">1</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>       <span class="k">if</span> <span class="n">progressBar</span><span class="o">.</span><span class="n">isCancelled</span><span class="p">():</span>
 <span class="gp">&gt;&gt;&gt; </span>            <span class="nb">print</span> <span class="s1">&#39;process cancelled&#39;</span>
-<span class="gp">&gt;&gt;&gt; </span>            <span class="k">return</span>
+<span class="gp">&gt;&gt;&gt; </span>            <span class="k">break</span>
 <span class="gp">&gt;&gt;&gt; </span>        <span class="n">progressBar</span><span class="o">.</span><span class="n">updateProgress</span><span class="p">()</span>
 </pre></div>
 </div>

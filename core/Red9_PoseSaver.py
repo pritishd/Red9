@@ -299,6 +299,7 @@ class DataMap(object):
         self.infoDict['sceneUnits']=cmds.currentUnit(q=True, fullName=True, linear=True)
         self.infoDict['upAxis'] = cmds.upAxis(q=True, axis=True)
         self.infoDict['metaPose']=self.metaPose
+
         if self.metaRig:
             self.infoDict['metaRigNode']=self.metaRig.mNode
             self.infoDict['metaRigNodeID']=self.metaRig.mNodeID
@@ -371,18 +372,20 @@ class DataMap(object):
                     if self.rootJnt:
                         self.rootJnt=self.rootJnt[0]
             else:
-                if cmds.attributeQuery('exportSkeletonRoot',node=rootNode,exists=True):
+                if cmds.attributeQuery('exportSkeletonRoot',node=rootNode, exists=True):
                     connectedSkel=cmds.listConnections('%s.%s' % (rootNode,'exportSkeletonRoot'),destination=True,source=True)
                     if connectedSkel and cmds.nodeType(connectedSkel)=='joint':
                         self.rootJnt=connectedSkel[0]
                     elif cmds.nodeType(rootNode)=='joint':
                         self.rootJnt=rootNode
-                if cmds.attributeQuery('animSkeletonRoot',node=rootNode,exists=True):
-                    connectedSkel=cmds.listConnections('%s.%s' % (rootNode,'animSkeletonRoot'),destination=True,source=True)
-                    if connectedSkel and cmds.nodeType(connectedSkel)=='joint':
-                        self.rootJnt=connectedSkel[0]
-                    elif cmds.nodeType(rootNode)=='joint':
-                        self.rootJnt=rootNode
+#                 elif cmds.attributeQuery('animSkeletonRoot',node=rootNode, exists=True):
+#                     connectedSkel=cmds.listConnections('%s.%s' % (rootNode,'animSkeletonRoot'),destination=True,source=True)
+#                     if connectedSkel and cmds.nodeType(connectedSkel)=='joint':
+#                         self.rootJnt=connectedSkel[0]
+#                     elif cmds.nodeType(rootNode)=='joint':
+#                         self.rootJnt=rootNode
+                elif self.settings.nodeTypes==['joint']:
+                    self.rootJnt=rootNode
         else:
             if self.metaPose:
                 self.setMetaRig(rootNode)
@@ -600,10 +603,12 @@ class DataMap(object):
                 if not mirrorID:
                     continue
                 for key in self.poseDict.keys():
-                    if self.poseDict[key]['mirrorID'] and self.poseDict[key]['mirrorID']==mirrorID:
-                        matchedPairs.append((key,node))
-                        log.debug('poseKey : %s %s >> matched MirrorIndex : %s' % (key, node, self.poseDict[key]['mirrorID']))
-                        break
+                    if 'mirrorID' in self.poseDict[key] and self.poseDict[key]['mirrorID']:
+                        poseID=self.poseDict[key]['mirrorID']
+                        if poseID==mirrorID:
+                            matchedPairs.append((key,node))
+                            log.debug('poseKey : %s %s >> matched MirrorIndex : %s' % (key, node, self.poseDict[key]['mirrorID']))
+                            break
         # unlike 'mirrorIndex' this matches JUST the ID's, the above matches SIDE_ID
         if self.matchMethod=='mirrorIndex_ID':
             getMirrorID=r9Anim.MirrorHierarchy().getMirrorIndex
@@ -612,10 +617,15 @@ class DataMap(object):
                 if not mirrorID:
                     continue
                 for key in self.poseDict.keys():
-                    if self.poseDict[key]['mirrorID'] and int(self.poseDict[key]['mirrorID'].split('_')[-1])==mirrorID:
-                        matchedPairs.append((key,node))
-                        log.debug('poseKey : %s %s >> matched MirrorIndex : %s' % (key, node, self.poseDict[key]['mirrorID']))
-                        break
+                    if 'mirrorID' in self.poseDict[key] and self.poseDict[key]['mirrorID']:
+                        poseID=self.poseDict[key]['mirrorID'].split('_')[-1]
+                        if not poseID=='None':
+                            if int(poseID)==mirrorID:
+                                matchedPairs.append((key,node))
+                                log.debug('poseKey : %s %s >> matched MirrorIndex : %s' % (key, node, self.poseDict[key]['mirrorID']))
+                                break
+                        else:
+                            log.debug('poseKey SKIPPED : %s:%s : as incorrect MirrorIDs' % (key,self.poseDict[key]['mirrorID']))
                     
         if self.matchMethod=='metaData':
             getMetaDict=self.metaRig.getNodeConnectionMetaDataMap  # optimisation
@@ -753,7 +763,7 @@ class PoseData(DataMap):
     >>> poseDict['TestCtr']['attrs']['translateY'] = 1.0 
     >>> poseDict['TestCtr']['attrs']['translateZ'] = 22 
     >>> 
-    >>> #if we're storing as MetaData we also include:
+    >>> # if we're storing as MetaData we also include:
     >>> poseDict['TestCtr']['metaData']['metaAttr'] = CTRL_L_Thing    = the attr that wires this node to the MetaSubsystem
     >>> poseDict['TestCtr']['metaData']['metaNodeID'] = L_Arm_System  = the metaNode this node is wired to via the above attr
     
@@ -766,11 +776,23 @@ class PoseData(DataMap):
         >>> pose=r9Pose.PoseData()
         >>> pose.metaPose=True
         >>>
-        >>> #cache the pose (just don't pass in a filePath)
+        >>> # cache the pose (just don't pass in a filePath)
         >>> pose.poseSave(cmds.ls(sl=True))
-        >>> #reload the cache you just stored
+        >>> # reload the cache you just stored
         >>> pose.poseLoad(cmds.ls(sl=True))
     
+    We can also load in a percentage of a pose by running the PoseData._applyData(percent) as follows:
+    
+        >>> pose=r9Pose.PoseData()
+        >>> pose.metaPose=True
+        >>> pose.filepath='C:/mypose.pose'
+        >>> 
+        >>> # processPoseFile does just that, processes and build up the list of data but doesn't apply it
+        >>> pose.processPoseFile(nodes='myRootNode')
+        >>> 
+        >>> # now we can dial in a percentage of the pose, we bind this to a floatSlider in the UI
+        >>> pose._applyData(percent=20)
+        
     .. note::
         If the root node of the hierarchy passed into the poseSave() has a message attr 
         'exportSkeletonRoot' or 'animSkeletonRoot' and that message is connected to a 
@@ -800,6 +822,8 @@ class PoseData(DataMap):
         self.relativePose=False
         self.relativeRots='projected'
         self.relativeTrans='projected'
+        
+        self.mirrorInverse=False  # when loading do we inverse the attrs values being loaded (PRO-PACK finger systems)
 
     def _collectNodeData(self, node, key):
         '''
@@ -810,6 +834,8 @@ class PoseData(DataMap):
     def _buildBlock_skeletonData(self, rootJnt):
         '''
         :param rootNode: root of the skeleton to process
+        
+        TODO : strip the longname from the root joint upwards and remove namespaces on all
         '''
         self.skeletonDict={}
         if not rootJnt:
@@ -820,11 +846,16 @@ class PoseData(DataMap):
         fn.settings.nodeTypes='joint'
         fn.settings.incRoots=False
         skeleton=fn.processFilter()
-
+        parentNode=cmds.listRelatives(rootJnt,p=True,f=True)
+        
         for jnt in skeleton:
             key=r9Core.nodeNameStrip(jnt)
             self.skeletonDict[key]={}
             self.skeletonDict[key]['attrs']={}
+            if parentNode:
+                self.skeletonDict[key]['longName']=jnt.replace(parentNode[0],'')
+            else:
+                self.skeletonDict[key]['longName']=jnt
             for attr in ['translateX','translateY','translateZ', 'rotateX','rotateY','rotateZ','jointOrientX','jointOrientY','jointOrientZ']:
                 try:
                     self.skeletonDict[key]['attrs'][attr]=cmds.getAttr('%s.%s' % (jnt,attr))
@@ -863,6 +894,7 @@ class PoseData(DataMap):
     def _applyData(self, percent=None):
         '''
         :param percent: percent of the pose to load
+        
         '''
         mix_percent=False  # gets over float values of zero from failing
         if percent or type(percent)==float:
@@ -881,6 +913,21 @@ class PoseData(DataMap):
                         continue
                     try:
                         val = eval(val)
+                        # =====================================================================
+                        # inverse the correct mirror attrs if the mirrorInverse flag was thrown
+                        # =====================================================================
+                        # this is mainly for the ProPack finger systems support hooks
+                        if self.mirrorInverse and 'mirrorID' in self.poseDict[key] and self.poseDict[key]['mirrorID']:
+                            axis=r9Anim.MirrorHierarchy().getMirrorAxis(dest)
+                            side=r9Anim.MirrorHierarchy().getMirrorSide(dest)
+                            if attr in axis:
+                                poseSide=self.poseDict[key]['mirrorID'].split('_')[0]
+                                if not poseSide==side:
+                                    val = 0-val
+                                    log.debug('Inversing Pose Values for Axis: %s, stored side: %s, nodes side: %s, node: %s' % (attr,
+                                                                                                                                  poseSide,
+                                                                                                                                  side,
+                                                                                                                                  r9Core.nodeNameStrip(dest)))
                     except:
                         pass
                     log.debug('node : %s : attr : %s : val %s' % (dest, attr, val))
@@ -1071,14 +1118,39 @@ class PosePointCloud(object):
     PosePointCloud is the technique inside the PoseSaver used to snap the pose into
     relative space. It's been added as a tool in it's own right as it's sometimes
     useful to be able to shift poses in global space.
+    
+    >>> # heres an mRig example, it will also work with any other rigs by just setting up
+    >>> # the filter settings object in the same way for any of the Red9 tools
+    >>> import Red9.core.Red9_PoseSaver as r9Pose
+    >>> import Red9.core.Red9_Meta as r9Meta
+    >>> 
+    >>> # grab our mRig node
+    >>> mrig=r9Meta.getMetaRigs()[0]
+    >>> 
+    >>> ppc=r9Pose.PosePointCloud(nodes=mrig.ctrl_main)
+    >>> ppc.settings.metaRig=True
+    >>> ppc.prioritySnapOnly=True  # for rigs you can turn this on so that ONLY those nodes in the filterPriority list get built and used
+    >>> 
+    >>> # build the cloud system
+    >>> ppc.buildOffsetCloud()   # you can also pass a root point in, used as the base pivot ( rootReference='pSphere1')
+    >>> 
+    >>> # to apply the cloud, snapping the rig into the clouds pose
+    >>> ppc.applyPosePointCloud()
+    >>> 
+    >>> # to sync the cloud to the rigs current frame, allowing you to update the clouds internal pose
+    >>> ppc.updatePosePointCloud()
+    >>> 
+    >>> # delete the ppc node
+    >>> ppc.delete()
     '''
-    def __init__(self, nodes, filterSettings=None, meshes=[], *args, **kws):
+    def __init__(self, nodes, filterSettings=None, meshes=[], prioritySnapOnly=False, *args, **kws):
         '''
         :param nodes: feed the nodes to process in as a list, if a filter is given
                       then these are the rootNodes for it
         :param filterSettings: pass in a filterSettings object to filter the given hierarchy
         :param meshes: this is really for reference, rather than make a locator, pass in a reference geo
                      which is then shapeSwapped for the PPC root node giving great reference!
+        :param prioritySnapOnly: ONLY make ppc points for the filterPriority nodes
         '''
            
         self.meshes = meshes
@@ -1091,7 +1163,7 @@ class PosePointCloud(object):
         self.posePointCloudNodes = []   # generated ppc nodes
         self.posePointRoot = None       # generated rootnode of the ppc
         self.settings = None
-        self.prioritySnapOnly=False     # ONLY make ppc points for the filterPriority nodes
+        self.prioritySnapOnly=prioritySnapOnly     # ONLY make ppc points for the filterPriority nodes
         
         self.rootReference = None   # root node used as the main pivot for the cloud
         self.isVisible = True       # Do we build the visual reference setup or not?
@@ -1111,8 +1183,8 @@ class PosePointCloud(object):
         on build push the data to a metaNode so it's cached in the scene incase we need to 
         reconstruct anything at a later date. This is used extensivly in the AnimReDirect calls
         '''
-        self.ppcMeta = r9Meta.MetaClass(name='PPC_Root')
-        self.ppcMeta.mClassGrp='PPCROOT'
+        #self.ppcMeta = r9Meta.MetaClass(name='PPC_Root')
+        #self.ppcMeta.mClassGrp='PPCROOT'
         self.ppcMeta.connectChild(self.posePointRoot, 'posePointRoot')
         self.ppcMeta.addAttr('posePointCloudNodes', self.posePointCloudNodes)
          
@@ -1214,6 +1286,10 @@ class PosePointCloud(object):
         
         self.deleteCurrentInstances()
 
+        # moved the mNode generation earlier so the rest of the code can bind to it during build
+        self.ppcMeta = r9Meta.MetaClass(name='PPC_Root')
+        self.ppcMeta.mClassGrp='PPCROOT'
+        
         self.posePointRoot=cmds.ls(cmds.spaceLocator(name='posePointCloud'),sl=True,l=True)[0]
         print self.posePointRoot
         cmds.setAttr('%s.visibility' % self.posePointRoot, self.isVisible)
@@ -1320,7 +1396,31 @@ class PoseCompare(object):
     It will compare either the main [poseData].keys or the ['skeletonDict'].keys 
     and for key in keys compare, with tolerance, the [attrs] block. 
     
-    >>> #build an mPose object and fill the internal poseDict
+        
+    >>> # lets do simple skeleton comparison giving it 2 rootjnts
+    >>> import Red9.core.Red9_PoseSaver as r9Pose
+    >>> # root jnts of skeletons to test
+    >>> test_root='root_of_skl_to_test'
+    >>> master_root='root_of_correct_skl'
+    >>>
+    >>> mPoseA=r9Pose.PoseData()
+    >>> mPoseA.settings.nodeTypes=['joint']
+    >>> mPoseA.buildDataMap(test_root)
+    >>> mPoseA.buildBlocks_fill()
+    >>>
+    >>> mPoseA=r9Pose.PoseData()
+    >>> mPoseA.settings.nodeTypes=['joint']
+    >>> mPoseA.buildDataMap(master_root)
+    >>> mPoseA.buildBlocks_fill()   
+    >>>
+    >>> compare=r9Pose.PoseCompare(mPoseA,mPoseB)
+    >>> compare.compare() #>> bool, True = same
+    
+    >>> ----------------------------------------------------
+    >>> # mRig manual pose testing - note that mRig has 
+    >>> # poseCompare wrapped as an internal function also!
+    >>> ----------------------------------------------------
+    >>> # build an mPose object and fill the internal poseDict
     >>> mPoseA=r9Pose.PoseData()
     >>> mPoseA.metaPose=True
     >>> mPoseA.buildDataMap(cmds.ls(sl=True))
@@ -1342,27 +1442,27 @@ class PoseCompare(object):
     >>> compare.fails['failedAttrs']
     '''
     def __init__(self, currentPose, referencePose, angularTolerance=0.1, linearTolerance=0.01, 
-                 compareDict='poseDict', filterMap=[], ignoreBlocks=[], ignoreStrings=[], ignoreAttrs=[]):
+                 compareDict='poseDict', filterMap=[], ignoreBlocks=[], ignoreStrings=[], ignoreAttrs=[], longName=False):
         '''
         Make sure we have 2 PoseData objects to compare
         :param currentPose: either a PoseData object or a valid pose file
         :param referencePose: either a PoseData object or a valid pose file
-        :param tolerance: tolerance by which floats are matched
         :param angularTolerance: the tolerance used to check rotate attr float values
         :param linearTolerance: the tolerance used to check all other float attrs
-        :param compareDict: the internal main dict in the pose file to compare the data with
+        :param compareDict: the internal main dict in the pose file to compare the data with : base options : 'poseDict', 'skeletonDict'
         :param filterMap: if given this is used as a high level filter, only matching nodes get compared
             others get skipped. Good for passing in a master core skeleton to test whilst ignoring extra nodes
         :param ignoreBlocks: allows the given failure blocks to be ignored. We mainly use this for ['missingKeys']
         :param ignoreStrings: allows you to pass in a list of strings, if any of the keys in the data contain
              that string it will be skipped, note this is a partial match so you can pass in wildcard searches ['_','_end']
         :param ignoreAttrs: allows you to skip given attrs from the poseCompare calls
+        :param longName: compare the longName DAG path stores against each node, note that the compare strips out any namespaces before compare
         
         .. note::
-            In the new setup if the skeletonRoot jnt is found we add a whole
-            new dict to serialize the current skeleton data to the pose, this means that
-            we can compare a pose on a rig via the internal skeleton transforms as well
-            as the actual rig controllers...makes validation a lot more accurate for export
+            In the new setup if the pose being generated had it's settings.nodeTypes=['joint'] or we found the 
+            exportSkeletonRoot jnt (mrig) then we add a whole new dict to serialize the current skeleton data to the pose, 
+            this means that we can then compare a pose on a rig via the internal skeleton transforms as well
+            as the actual rig controllers... makes validation a lot more accurate for export
                 * 'poseDict'     = [poseData] main controller data
                 * 'skeletonDict' = [skeletonDict] block generated if exportSkeletonRoot is connected
                 * 'infoDict'     = [info] block
@@ -1379,6 +1479,7 @@ class PoseCompare(object):
         self.ignoreBlocks = ignoreBlocks
         self.ignoreStrings = ignoreStrings
         self.ignoreAttrs = ignoreAttrs
+        self.longName = longName
         
         if isinstance(currentPose, PoseData):
             self.currentPose = currentPose
@@ -1415,7 +1516,11 @@ class PoseCompare(object):
         for processing later if required
         '''
         self.fails = {}
-        logprint = 'PoseCompare returns : %s ========================================\n' % self.compareDict
+        logprint_keymismacth=''
+        logprint_dagpath=''
+        logprint_missingattr=''
+        logprint_missingfail=''
+                              
         currentDic = getattr(self.currentPose, self.compareDict)
         referenceDic = getattr(self.referencePose, self.compareDict)
         
@@ -1426,15 +1531,28 @@ class PoseCompare(object):
             if self.filterMap and not key in self.filterMap:
                 log.debug('node not in filterMap - skipping key %s' % key)
                 continue
+            skip=False
+            
+            # --------------------------------------------
+            # check that the key isn't in the ignoreStrings
+            # --------------------------------------------
             if self.ignoreStrings:
                 for istr in self.ignoreStrings:
                     if istr in key:
-                        continue
+                        skip=True
+                        break
+            if skip:
+                continue
+            
+            # ---------------------------------------------         
+            # "missingKeys" block - check that the key exists
+            # ---------------------------------------------
+
             if key in referenceDic:
                 referenceAttrBlock = referenceDic[key]
             else:
                 if not 'missingKeys' in self.ignoreBlocks:
-                    logprint += 'ERROR: Key Mismatch : %s\n' % key
+                    logprint_keymismacth += 'ERROR: Key Mismatch : %s\n' % key
                     if not 'missingKeys' in self.fails:
                         self.fails['missingKeys'] = []
                     self.fails['missingKeys'].append(key)
@@ -1442,50 +1560,82 @@ class PoseCompare(object):
                     log.debug('missingKeys in ignoreblock : node is missing from data but being skipped "%s"' % key)
                 continue
 
+            # ---------------------------------------------         
+            # "hierarchyMismatch" block - check full dagPaths
+            # ---------------------------------------------
+            try:
+                expectedDag=r9Core.removeNameSpace_fromDag(referenceAttrBlock['longName'])
+                currentDag=r9Core.removeNameSpace_fromDag(attrBlock['longName'])
+    
+                if self.longName and not expectedDag == currentDag:
+                    if not 'dagMismatch' in self.ignoreBlocks:
+                        logprint_dagpath += 'ERROR: hierarchy Mismatch : \n\t\tcurrentValue=\t"%s" >> \n\t\texpectedValue=\t"%s"\n' % (currentDag, expectedDag)
+                        if not 'dagMismatch' in self.fails:
+                            self.fails['dagMismatch'] = []
+                        self.fails['dagMismatch'].append(key)
+                    else:
+                        log.debug('dagMismatch in ignoreblock : DagPath compare being skipped "%s"' % key)
+            except:
+                log.debug('Skipping DAGPATH compare as "longName" was not found in the reference pose : "%s"' % key)
+    
+            # ---------------------------------------------         
+            # "failedAttrs" block - compare attr values
+            # ---------------------------------------------
+                        
+            # check that this object actually has attr data in the pose
             if not 'attrs' in attrBlock:
                 log.debug('%s node has no attrs block in the pose' % key)
                 continue
-            for attr, value in attrBlock['attrs'].items():
-                if attr in self.ignoreAttrs:
+            else:
+                if 'failedAttrs' in self.ignoreBlocks:
+                    log.debug('failedAttrs in ignoreblock : attr compare being skipped "%s"' % key)
                     continue
-                # attr missing completely from the key
-                if not attr in referenceAttrBlock['attrs']:
-                    if not 'failedAttrs' in self.fails:
-                        self.fails['failedAttrs'] = {}
-                    if not key in self.fails['failedAttrs']:
-                        self.fails['failedAttrs'][key] = {}
-                    if not 'missingAttrs' in self.fails['failedAttrs'][key]:
-                        self.fails['failedAttrs'][key]['missingAttrs'] = []
-                    self.fails['failedAttrs'][key]['missingAttrs'].append(attr)
-                    # log.info('missing attribute in data : "%s.%s"' % (key,attr))
-                    logprint += 'ERROR: Missing attribute in data : "%s.%s"\n' % (key, attr)
-                    continue
-                
-                # test the attrs value matches
-                #print 'key : ', key, 'Value :  ', value
-                value = r9Core.decodeString(value)  # decode as this may be a configObj
-                refValue = r9Core.decodeString(referenceAttrBlock['attrs'][attr])  # decode as this may be a configObj
-                
-                if type(value) == float:
-                    matched = False
-                    if attr in self.angularAttrs:
-                        matched = r9Core.floatIsEqual(value, refValue, self.angularTolerance, allowGimbal=True)
-                    else:
-                        matched = r9Core.floatIsEqual(value, refValue, self.linearTolerance, allowGimbal=False)
-                    if not matched:
-                        self.__addFailedAttr(key, attr)
-                        # log.info('AttrValue float mismatch : "%s.%s" currentValue=%s >> expectedValue=%s' % (key,attr,value,refValue))
-                        logprint += 'ERROR: AttrValue float mismatch : "%s.%s" currentValue=%s >> expectedValue=%s\n' % (key, attr, value, refValue)
+                # main compare block for attr values
+                for attr, value in attrBlock['attrs'].items():
+                    if attr in self.ignoreAttrs:
                         continue
-                elif not value == refValue:
-                    self.__addFailedAttr(key, attr)
-                    # log.info('AttrValue mismatch : "%s.%s" currentValue=%s >> expectedValue=%s' % (key,attr,value,refValue))
-                    logprint += 'ERROR: AttrValue mismatch : "%s.%s" currentValue=%s >> expectedValue=%s\n' % (key, attr, value, refValue)
-                    continue
+                    # attr missing completely from the key
+                    if not attr in referenceAttrBlock['attrs']:
+                        if not 'failedAttrs' in self.fails:
+                            self.fails['failedAttrs'] = {}
+                        if not key in self.fails['failedAttrs']:
+                            self.fails['failedAttrs'][key] = {}
+                        if not 'missingAttrs' in self.fails['failedAttrs'][key]:
+                            self.fails['failedAttrs'][key]['missingAttrs'] = []
+                        self.fails['failedAttrs'][key]['missingAttrs'].append(attr)
+                        logprint_missingattr += 'ERROR: Missing attribute in data : "%s.%s"\n' % (key, attr)
+                        continue
+                    
+                    # test the attrs value matches
+                    value = r9Core.decodeString(value)  # decode as this may be a configObj
+                    refValue = r9Core.decodeString(referenceAttrBlock['attrs'][attr])  # decode as this may be a configObj
+                    
+                    if type(value) == float:
+                        matched = False
+                        if attr in self.angularAttrs:
+                            matched = r9Core.floatIsEqual(value, refValue, self.angularTolerance, allowGimbal=True)
+                        else:
+                            matched = r9Core.floatIsEqual(value, refValue, self.linearTolerance, allowGimbal=False)
+                        if not matched:
+                            self.__addFailedAttr(key, attr)
+                            logprint_missingfail += 'ERROR: AttrValue float mismatch : "%s.%s" currentValue=%s >> expectedValue=%s\n' % (key, attr, value, refValue)
+                            continue
+                    elif not value == refValue:
+                        self.__addFailedAttr(key, attr)
+                        logprint_missingfail += 'ERROR: AttrValue mismatch : "%s.%s" currentValue=%s >> expectedValue=%s\n' % (key, attr, value, refValue)
+                        continue
                 
-        if 'missingKeys' in self.fails or 'failedAttrs' in self.fails:
-            logprint += 'PoseCompare returns : ========================================'
-            print logprint
+        if any(['missingKeys' in self.fails, 'failedAttrs' in self.fails, 'dagMismatch' in self.fails]):
+            print 'PoseCompare returns : "%s" ========================================\n' % self.compareDict
+            if logprint_keymismacth:
+                print logprint_keymismacth
+            if logprint_dagpath:
+                print logprint_dagpath
+            if logprint_missingattr:
+                print logprint_missingattr
+            if logprint_missingfail:
+                print logprint_missingfail
+            print 'PoseCompare returns : ========================================'
             return False
         self.status = True
         return True
@@ -1508,22 +1658,29 @@ def batchPatchPoses(posedir, config, poseroot, load=True, save=True, patchfunc=N
     '''
 
     filterObj=r9Core.FilterNode_Settings()
-    filterObj.read(os.path.join(r9Setup.red9ModulePath(), 'presets', config))  # 'Crytek_New_Meta.cfg'))
+    filterObj.read(os.path.join(r9Setup.red9ModulePath(), 'presets', config))
     mPose=PoseData(filterObj)
-    
+    mPose.setMetaRig(poseroot)
     files=os.listdir(posedir)
     files.sort()
     for f in files:
         if f.lower().endswith('.pose'):
             if load:
-                mPose.poseLoad(poseroot, os.path.join(posedir,f),
+                print 'Loading Pose : %s' % os.path.join(posedir,f)
+                mPose.poseLoad(nodes=poseroot, 
+                               filepath=os.path.join(posedir,f),
                                useFilter=True,
                                relativePose=relativePose,
                                relativeRots=relativeRots,
                                relativeTrans=relativeTrans)
             if patchfunc:
+                print 'Applying patch'
                 patchfunc(f)
             if save:
-                mPose.poseSave(poseroot, os.path.join(posedir,f), useFilter=True, storeThumbnail=False)
+                print 'Saving Pose : %s' % os.path.join(posedir,f)
+                mPose.poseSave(nodes=poseroot,
+                               filepath=os.path.join(posedir,f),
+                               useFilter=True,
+                               storeThumbnail=False)
             log.info('Processed Pose File :  %s' % f)
 

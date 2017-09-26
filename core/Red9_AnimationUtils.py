@@ -47,7 +47,6 @@ Code examples:
     >>> # the class directly so you no longer need to create a filterSettigns object directly!
     >>> # Lets set the filter to process nodes with a given attr 'myControl' who's type is 'nurbscurve'
     >>> animFunc=r9Anim.AnimFunctions()
-    >>> animFunc.settings = r9Core.FilterNode_Settings()
     >>> animFunc.settings.nodeTypes ='nurbsCurve'
     >>> animFunc.settings.searchAttrs = 'myControl'
     >>> animFunc.settings.printSettings()
@@ -203,8 +202,33 @@ def getSettableChannels(node=None, incStatics=True):
     else:
         #all settable attrs in the channelBox
         return getChannelBoxAttrs(node, asDict=False, incLocked=False)
-        
 
+def nodesDriven(nodes, allowReferenced=False):
+    '''
+    return a list of those nodes that are actively constrained or connected to a pairBlend
+    
+    param allowReferenced: if True we allow all constraints to be returned, if False any constraints 
+        that are referenced are skipped. This by-passes internal rig constraints and only returns
+        constraints made in the main scene.
+    '''
+    driven=[]
+    for node in nodes:
+        plug=cmds.listConnections(node, type='character', s=True, d=False, p=True)
+        if not plug:
+            plug=node
+        if plug:
+            con=cmds.listConnections(plug, s=True, d=False, type='constraint', c=True)
+            if not con:
+                con=cmds.listConnections(node, s=True, d=False, type='pairBlend', c=True)
+            if con:
+                if allowReferenced:
+                    driven.append((node, con[1]))
+                    log.info('%s is currently driven by >> %s' % (r9Core.nodeNameStrip(node), con[1]))
+                elif not cmds.referenceQuery(con[1], inr=True):
+                    driven.append((node, con[1]))  
+                    log.info('%s is currently driven by >> %s' % (r9Core.nodeNameStrip(node), con[1]))
+    return driven
+    
 def getAnimLayersFromGivenNodes(nodes):
     '''
     return all animLayers associated with the given nodes
@@ -315,47 +339,51 @@ def eulerSelected():
     cmds.delete(cmds.ls(sl=True, l=True), sc=True)
 
        
-def animCurveDrawStyle(style='simple', forceBuffer=True,
-                   showBufferCurves=False, displayTangents=False, displayActiveKeyTangents=True, *args):
+def animCurveDrawStyle(style='simple', forceBuffer=True, showBufferCurves=False,
+                       displayTangents=False, displayActiveKeyTangents=True, *args):
     '''
     Toggle the state of the graphEditor curve display, used in the Filter and Randomizer to
     simplify the display and the curve whilst processing. This allows you to also pass in
     the state directly, used by the UI close event to return the editor to the last cached state
     '''
     print 'toggleCalled', style, showBufferCurves, displayTangents, displayActiveKeyTangents
-
-    if style == 'simple':
-        print 'toggle On'
+    if forceBuffer is not None:
         if forceBuffer:
             if r9Setup.mayaVersion()<2017:
                 mel.eval('doBuffer snapshot;')
             else:
                 mel.eval('doBuffer snapshot graphEditor1GraphEd;')
+    if style == 'simple':
+        #print 'toggle On'
         mel.eval('animCurveEditor -edit -showBufferCurves 1 -displayTangents false -displayActiveKeyTangents false graphEditor1GraphEd;')
     elif style == 'full':
-        print 'toggleOff'
+        #print 'toggleOff'
         cmd='animCurveEditor -edit'
-        if showBufferCurves:
-            cmd+=' -showBufferCurves 1'
-        else:
-            cmd+=' -showBufferCurves 0'
-        if displayTangents:
-            cmd+=' -displayTangents true'
-        else:
-            cmd+=' -displayTangents false'
-        if displayActiveKeyTangents:
-            cmd+= ' -displayActiveKeyTangents true'
-        else:
-            cmd+= ' -displayActiveKeyTangents false'
+        if showBufferCurves is not None:
+            if showBufferCurves:
+                cmd+=' -showBufferCurves 1'
+            else:
+                cmd+=' -showBufferCurves 0'
+        if displayTangents is not None:
+            if displayTangents:
+                cmd+=' -displayTangents true'
+            else:
+                cmd+=' -displayTangents false'
+        if displayActiveKeyTangents is not None:
+            if displayActiveKeyTangents:
+                cmd+= ' -displayActiveKeyTangents true'
+            else:
+                cmd+= ' -displayActiveKeyTangents false'
         mel.eval('%s graphEditor1GraphEd;' % cmd)
 
 
-    
-# TimeRange / AnimRange Functions -------------------------------------------------
+# ----------------------------------------------------------------------------
+# TimeRange / AnimRange Functions ----
+# ----------------------------------------------------------------------------
 
 def animRangeFromNodes(nodes, setTimeline=True):
     '''
-    return the extend of the animation range for the given objects
+    return the extent of the animation range for the given objects
     :param nodes: nodes to examine for animation data
     :param setTimeLine: whether we should set the playback timeline to the extent of the found anim data
     '''
@@ -449,7 +477,9 @@ def setTimeRangeToo(nodes=None, setall=True):
 #    time=cmds.timeControl(PlayBackSlider ,e=True, rangeArray=True, v=time)
 
 
-# MAIN CALLS -----------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# MAIN CALLS ----
+# ----------------------------------------------------------------------------
 
 class AnimationLayerContext(object):
     """
@@ -460,15 +490,20 @@ class AnimationLayerContext(object):
         self.srcNodes = srcNodes  # nodes to check for animLayer membership / process
         self.mergeLayers = mergeLayers  # mute the behaviour of this context
         self.restoreOnExit = restoreOnExit  # restore the original layers after processing
-        
+        self.keymode = None
         self.deleteBaked=True
         if self.restoreOnExit:
             self.deleteBaked=False
         self.animLayers=[]
-        log.debug('Context Manager : mergeLayers : %s, restoreOnExit : %s' % (self.mergeLayers, self.restoreOnExit))
+        #log.debug('Context Manager : mergeLayers : %s, restoreOnExit : %s' % (self.mergeLayers, self.restoreOnExit))
     
     def __enter__(self):
         self.animLayers=getAnimLayersFromGivenNodes(self.srcNodes)
+
+        # set to "Hybrid" just in case as we need the exposure of all keys for most functions
+        self.keymode = cmds.optionVar(q='animLayerSelectionKey')
+        cmds.optionVar(iv=('animLayerSelectionKey', 1))
+
         if self.animLayers:
             if self.mergeLayers:
                 try:
@@ -478,8 +513,8 @@ class AnimationLayerContext(object):
                                            'locked':cmds.animLayer(layer, q=True, lock=True)}
                     mergeAnimLayers(self.srcNodes, deleteBaked=self.deleteBaked)
                     if self.restoreOnExit:
-                        #return the original mute and lock states and select the new
-                        #MergedLayer ready for the rest of the copy code to deal with
+                        # return the original mute and lock states and select the new
+                        # mergedLayer ready for the rest of the copy code to deal with
                         for layer,cache in layerCache.items():
                             for layer,cache in layerCache.items():
                                 cmds.animLayer(layer, edit=True, mute=cache['mute'])
@@ -492,28 +527,17 @@ class AnimationLayerContext(object):
                 log.warning('SrcNodes have animLayers, results may be erratic unless Baked!')
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # Close the undo chunk, warn if any exceptions were caught:
+        # close the undo chunk, warn if any exceptions were caught:
+        cmds.optionVar(iv=('animLayerSelectionKey', self.keymode))
         if self.mergeLayers and self.restoreOnExit:
             if self.animLayers and cmds.animLayer('Merged_Layer', query=True, exists=True):
                 cmds.delete('Merged_Layer')
         if exc_type:
             log.exception('%s : %s'%(exc_type, exc_value))
-        # If this was false, it would re-raise the exception when complete
+            
+        # if this was false, it would re-raise the exception when complete
         return True
 
-# ==========================================================================================================
-# Maya 2017 workspace replaces dockControl but still not got my head round how the hell you get this to run??
-# ==========================================================================================================
-'''
-work in progress: 
-
-    element=mel.eval('getUIComponentDockControl("Channel Box / Layer Editor", false);')
-    windowcall='import Red9.core.Red9_AnimationUtils as r9Anim;r9Anim.AnimationUI().show()'
-    cmds.workspaceControl('red9_anim35u', label="Red9_Animation", uiScript=windowcall, tabToControl=(element, -1))  ???
-    
-    cmds.workspaceControl('red9_anim35u', label="Red9_Animation", uiScript=windowcall, dockToControl=("MainPane","left)) ???
-'''
-# ==========================================================================================================
 
 class AnimationUI(object):
     
@@ -521,9 +545,11 @@ class AnimationUI(object):
         self.buttonBgc = r9Setup.red9ButtonBGC(1)
         self.win = 'Red9AnimToolsWin'
         self.dockCnt = 'Red9AnimToolsDoc'
+        self.workspaceCnt = 'Red9AnimToolsWorkspace'
         self.label = LANGUAGE_MAP._AnimationUI_.title
         self.internalConfigPath=False
         self.dock = dockUI
+        self.uiBoot=True
         
         # take generic filterSettings Object
         self.filterSettings = r9Core.FilterNode_Settings()
@@ -547,6 +573,9 @@ class AnimationUI(object):
         # Default Red9 poseHandlers now bound here if found, used to extend Clients handling of data
         self.poseHandlerPaths=[os.path.join(self.presetDir,'poseHandlers')]
         
+        # bind the ui element names to the class
+        self.__uiElementBinding()
+        
         # Internal config file setup for the UI state
         if self.internalConfigPath:
             self.ui_optVarConfig = os.path.join(self.presetDir, '__red9config__')
@@ -558,13 +587,17 @@ class AnimationUI(object):
         
     @classmethod
     def show(cls):
+        '''
+        main UI call. manages 2017 workspaces here..
+        '''
         global RED_ANIMATION_UI
         global RED_ANIMATION_UI_OPENCALLBACKS
+        
         animUI=cls()
-
+        animUI.uiBoot=True
+        
         if 'ui_docked' in animUI.ANIM_UI_OPTVARS['AnimationUI']:
             animUI.dock = eval(animUI.ANIM_UI_OPTVARS['AnimationUI']['ui_docked'])
-
         if r9General.getModifier() == 'Ctrl':
             if not animUI.dock:
                 print 'Switching dockState : True'
@@ -582,37 +615,149 @@ class AnimationUI(object):
                         func(animUI)
                     except:
                         log.warning('RED_ANIMATION_UI_OPENCALLBACKS failed')
-                
-        animUI._showUI()
-        animUI.ANIM_UI_OPTVARS['AnimationUI']['ui_docked'] = animUI.dock
-        animUI.__uiCache_storeUIElements()
+        
+        # ========================================================
+        # Maya 2017 we switch from dockControl to workspaceControl
+        # ======================================================== 
+        if r9Setup.mayaVersion()>=2017:
+            # if the workspace exists just show it, else bind the ui to it
+            if not cmds.workspaceControl(animUI.workspaceCnt, q=True, exists=True):
+                element=mel.eval('getUIComponentDockControl("Channel Box / Layer Editor", false);')  # get the channelBox element control
+                windowcall='import Red9.core.Red9_AnimationUtils as r9Anim;animUI=r9Anim.AnimationUI();animUI._showUI()'
+                cmds.workspaceControl(animUI.workspaceCnt, label="Red9_Animation", 
+                                      uiScript=windowcall,  # animUI._showUI, 
+                                      tabToControl=(element, -1), 
+                                      initialWidth=355, 
+                                      initialHeight=720,
+                                      minimumWidth=True,
+                                      widthProperty='fixed',
+                                      retain=False,
+                                      loadImmediately=False)  
+            else:
+                print 'Workspace Red9 already exists, calling open'
+            cmds.workspaceControl(animUI.workspaceCnt, e=True,vis=True)
+            cmds.workspaceControl(animUI.workspaceCnt, e=True,r=True)  # raise it
+            if not animUI.dock:
+                cmds.workspaceControl(animUI.workspaceCnt, e=True, fl=True)
+        else:
+            animUI._showUI()
+            animUI.ANIM_UI_OPTVARS['AnimationUI']['ui_docked'] = animUI.dock
+            animUI.__uiCache_storeUIElements()
+            
+        animUI.uiBoot=False
     
     def __uicloseEvent(self,*args):
-        print 'AnimUI close event called'
+        #print 'AnimUI close event called'
         self.__uiCache_storeUIElements()
         RED_ANIMATION_UI=None
         del(self)
     
-#     def __del__(self):
-#         if cmds.scriptJob(exists=self.jobOnDelete):
-#             cmds.scriptJob(kill=self.jobOnDelete, force=True)
-            
-    def _showUI(self):
+    def __uiElementBinding(self):
+        '''
+        this is GASH! rather than have each ui element cast itself to the object as we used to do, 
+        we're now manually setting up those name maps to by-pass the way we have to call the UI in 
+        2017 via the workspace.... Maybe I'm missing something in the workspace setup but don't think so.
+        Must see if there's a way of binding to the class object as you'd expect :(
+        '''  
         
-        #if r9Setup.mayaVersion()>=2017:
-        #    self.dock=False
-        #else:
-        try:
-            #'Maya2011 dock delete'
-            if cmds.dockControl(self.dockCnt, exists=True):
-                cmds.deleteUI(self.dockCnt, control=True)
-        except:
-            self.dock=False
+        # CopyAttributes
+        #====================
+        self.uicbCAttrHierarchy = 'uicbCAttrHierarchy'
+        self.uicbCAttrToMany = 'uicbCAttrToMany'
+        self.uicbCAttrChnAttrs = 'uicbCAttrChnAttrs'
+
+        # CopyKeys
+        #====================
+        self.uicbCKeyHierarchy = 'uicbCKeyHierarchy'
+        self.uicbCKeyToMany = 'uicbCKeyToMany'
+        self.uicbCKeyChnAttrs = 'uicbCKeyChnAttrs'
+        self.uicbCKeyRange = 'uicbCKeyRange'
+        self.uicbCKeyAnimLay = 'uicbCKeyAnimLay'
+        self.uiffgCKeyStep = 'uiffgCKeyStep'
+
+        # SnapTransforms
+        #====================
+        self.uicbSnapRange = 'uicbSnapRange'
+        self.uicbSnapTrans = 'uicbSnapTrans'
+        self.uicbSnapPreCopyKeys = 'uicbSnapPreCopyKeys'
+        self.uiifgSnapStep = 'uiifgSnapStep'
+        self.uicbSnapHierarchy = 'uicbSnapHierarchy'
+        self.uicbStapRots = 'uicbStapRots'
+        self.uicbSnapPreCopyAttrs = 'uicbSnapPreCopyAttrs'
+        self.uiifSnapIterations = 'uiifSnapIterations'
+
+        # Stabilizer
+        #====================
+        self.uicbStabRange = 'uicbStabRange'
+        self.uicbStabTrans = 'uicbStabTrans'
+        self.uicbStabRots = 'uicbStabRots'
+        self.uiffgStabStep = 'uiffgStabStep'
+
+        # TimeOffset
+        #====================
+        self.uicbTimeOffsetHierarchy = 'uicbTimeOffsetHierarchy'
+        self.uicbTimeOffsetScene = 'uicbTimeOffsetScene'
+        self.uicbTimeOffsetPlayback = 'uicbTimeOffsetPlayback'
+        self.uicbTimeOffsetRange = 'uicbTimeOffsetRange'
+        self.uicbTimeOffsetFlocking = 'uicbTimeOffsetFlocking'
+        self.uicbTimeOffsetRandom = 'uicbTimeOffsetRandom'
+        self.uicbTimeOffsetRipple = 'uicbTimeOffsetRipple'
+        self.uicbTimeOffsetStartfrm = 'uicbTimeOffsetStartfrm'
+        self.uiffgTimeOffset = 'uiffgTimeOffset'
+        self.uibtnTimeOffset = 'uibtnTimeOffset'
         
-        if cmds.window(self.win, exists=True):
-            cmds.deleteUI(self.win, window=True)
-            
-        animwindow = cmds.window(self.win, title=self.label)
+        self.uicbMirrorHierarchy = 'uicbMirrorHierarchy'
+        
+        # Hierarchy Controls 
+        #=====================
+        self.uiclHierarchyFilters = 'uiclHierarchyFilters'
+        self.uicbMetaRig = 'uicbMetaRig'
+        self.uitfgSpecificNodeTypes = 'uitfgSpecificNodeTypes'
+        self.uitfgSpecificAttrs = 'uitfgSpecificAttrs'
+        self.uitfgSpecificPattern = 'uitfgSpecificPattern'
+        self.uitslFilterPriority = 'uitslFilterPriority'
+        self.uicbSnapPriorityOnly = 'uicbSnapPriorityOnly'
+        self.uitslPresets = 'uitslPresets'
+        self.uicbIncRoots = 'uicbIncRoots'
+
+        # Pose Saver Tab
+        #===============
+        self.uitfgPosePath = 'uitfgPosePath'
+        self.uircbPosePathMethod = 'posePathMode'
+        self.posePopupGrid = 'posePopupGrid'
+        
+        # SubFolder Scroller
+        #=====================
+        self.uitslPoseSubFolders ='uitslPoseSubFolders'
+        
+        # Main PoseFields
+        #=====================
+        self.tfPoseSearchFilter='tfPoseSearchFilter'
+        self.uitslPoses = 'uitslPoses'
+        self.uiglPoseScroll = 'uiglPoseScroll'
+        self.uiglPoses = 'uiglPoses'
+        self.uicbPoseHierarchy = 'uicbPoseHierarchy'
+        self.uitfgPoseRootNode = 'uitfgPoseRootNode'
+        self.uicbPoseRelative = 'uicbPoseRelative'
+        self.uicbPoseSpace = 'uicbPoseSpace'
+        self.uiflPoseRelativeFrame = 'PoseRelativeFrame'
+        self.uircbPoseRotMethod = 'relativeRotate'
+        self.uircbPoseTranMethod = 'relativeTranslate'
+       
+        
+    def _showUI(self, *args):
+        
+        if not r9Setup.mayaVersion()>=2017:
+            # 2017 introduces workspaces and we're going to use those instead of dockControls
+            try:
+                # Maya2011 dockControl introduced
+                if cmds.dockControl(self.dockCnt, exists=True):
+                    cmds.deleteUI(self.dockCnt, control=True)
+            except:
+                self.dock=False
+            if cmds.window(self.win, exists=True):
+                cmds.deleteUI(self.win, window=True)
+            animwindow = cmds.window(self.win, title=self.label)
         
         cmds.menuBarLayout()
         cmds.menu(l=LANGUAGE_MAP._Generic_.vimeo_menu)
@@ -661,12 +806,12 @@ class AnimationUI(object):
        
         cmds.separator(h=5, style='none')
         cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 100), (2, 100), (3, 100)], columnSpacing=[(1, 10), (2, 10)])
-        self.uicbCAttrHierarchy = cmds.checkBox('uicbCAttrHierarchy', l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False,
+        cmds.checkBox(self.uicbCAttrHierarchy, l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False,
                                                 ann=LANGUAGE_MAP._AnimationUI_.copy_attrs_hierarchy_ann,
-                                                cc=lambda x: self.__uiCache_addCheckbox('uicbCAttrHierarchy'))
-        self.uicbCAttrToMany = cmds.checkBox('uicbCAttrToMany', l=LANGUAGE_MAP._AnimationUI_.copy_to_many, al='left', v=False,
+                                                cc=lambda x: self.__uiCache_addCheckbox(self.uicbCAttrHierarchy))
+        cmds.checkBox(self.uicbCAttrToMany, l=LANGUAGE_MAP._AnimationUI_.copy_to_many, al='left', v=False,
                                                 ann=LANGUAGE_MAP._AnimationUI_.copy_attrs_to_many_ann)
-        self.uicbCAttrChnAttrs = cmds.checkBox(ann=LANGUAGE_MAP._AnimationUI_.cbox_attrs_ann,
+        cmds.checkBox(self.uicbCAttrChnAttrs, ann=LANGUAGE_MAP._AnimationUI_.cbox_attrs_ann,
                                             l=LANGUAGE_MAP._AnimationUI_.cbox_attrs, al='left', v=False)
         cmds.setParent(self.AnimLayout)
               
@@ -684,19 +829,19 @@ class AnimationUI(object):
         cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 100), (2, 100), (3, 100)], columnSpacing=[(1, 10), (2, 10)], rowSpacing=[(1,5)])
         #cmds.rowColumnLayout(numberOfColumns=4, columnWidth=[(1, 75), (2, 80), (3, 80), (3, 80)], columnSpacing=[(1, 10), (2, 10)], rowSpacing=[(1,5)])
        
-        self.uicbCKeyHierarchy = cmds.checkBox('uicbCKeyHierarchy', l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False,
+        cmds.checkBox(self.uicbCKeyHierarchy, l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.copy_keys_hierarchy_ann,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbCKeyHierarchy'))
-        self.uicbCKeyToMany = cmds.checkBox('uicbCKeyToMany', l=LANGUAGE_MAP._AnimationUI_.copy_to_many, al='left', v=False,
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbCKeyHierarchy))
+        cmds.checkBox(self.uicbCKeyToMany, l=LANGUAGE_MAP._AnimationUI_.copy_to_many, al='left', v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.copy_keys_to_many_ann)
-        self.uicbCKeyChnAttrs = cmds.checkBox(ann=LANGUAGE_MAP._AnimationUI_.cbox_attrs_ann,
+        cmds.checkBox(self.uicbCKeyChnAttrs, ann=LANGUAGE_MAP._AnimationUI_.cbox_attrs_ann,
                                             l=LANGUAGE_MAP._AnimationUI_.cbox_attrs, al='left', v=False)
-        self.uicbCKeyRange = cmds.checkBox('uicbCKeyRange', l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', v=False,
+        cmds.checkBox(self.uicbCKeyRange, l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.copy_keys_timerange_ann,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbCKeyRange'))
-        self.uicbCKeyAnimLay = cmds.checkBox('uicbCKeyAnimLay', l=LANGUAGE_MAP._AnimationUI_.copy_keys_merge_layers, al='left', v=False,
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbCKeyRange))
+        cmds.checkBox(self.uicbCKeyAnimLay, l=LANGUAGE_MAP._AnimationUI_.copy_keys_merge_layers, al='left', v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.copy_keys_merge_layers_ann,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbCKeyAnimLay'))
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbCKeyAnimLay))
         
         cmds.setParent('..')
         cmds.separator(h=10, style='in')
@@ -716,7 +861,7 @@ class AnimationUI(object):
                        "fitMerge"]:
             cmds.menuItem(l=preset)
         cmds.optionMenu('om_PasteMethod', e=True, v='replace')
-        self.uiffgCKeyStep = cmds.floatFieldGrp('uiffgCKeyStep', l=LANGUAGE_MAP._AnimationUI_.offset, value1=0, cw2=(40, 50))
+        cmds.floatFieldGrp(self.uiffgCKeyStep, l=LANGUAGE_MAP._AnimationUI_.offset, value1=0, cw2=(40, 50))
         cmds.setParent(self.AnimLayout)
 
 
@@ -735,27 +880,27 @@ class AnimationUI(object):
         cmds.rowColumnLayout(numberOfColumns=4, columnWidth=[(1, 75), (2, 50), (3, 90), (4, 85)],
                              columnSpacing=[(1, 8), (2, 8), (3, 8)], rowSpacing=[(1,2)])
 
-        self.uicbSnapRange = cmds.checkBox('uicbSnapRange', l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', v=False,
+        cmds.checkBox(self.uicbSnapRange, l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.snaptransforms_timerange_ann,
                                             cc=self.__uiCB_manageSnapTime)
-        self.uicbSnapTrans = cmds.checkBox('uicbStanTrans', l=LANGUAGE_MAP._AnimationUI_.trans, al='left', v=True,
+        cmds.checkBox(self.uicbSnapTrans, l=LANGUAGE_MAP._AnimationUI_.trans, al='left', v=True,
                                            ann=LANGUAGE_MAP._AnimationUI_.trans_ann,
-                                           cc=lambda x: self.__uiCache_addCheckbox('uicbStanTrans'))
-        self.uicbSnapPreCopyKeys = cmds.checkBox('uicbSnapPreCopyKeys', l=LANGUAGE_MAP._AnimationUI_.pre_copykeys, al='left',
+                                           cc=lambda x: self.__uiCache_addCheckbox(self.uicbSnapTrans))
+        cmds.checkBox(self.uicbSnapPreCopyKeys, l=LANGUAGE_MAP._AnimationUI_.pre_copykeys, al='left',
                                                  ann=LANGUAGE_MAP._AnimationUI_.pre_copykeys_ann,
                                                  en=False, v=True)
-        self.uiifgSnapStep = cmds.intFieldGrp('uiifgSnapStep', l=LANGUAGE_MAP._AnimationUI_.frmstep, en=False, value1=1, cw2=(45, 30),
+        cmds.intFieldGrp(self.uiifgSnapStep, l=LANGUAGE_MAP._AnimationUI_.frmstep, en=False, value1=1, cw2=(45, 30),
                                               ann=LANGUAGE_MAP._AnimationUI_.frmstep_ann)
 
-        self.uicbSnapHierarchy = cmds.checkBox('uicbSnapHierarchy', l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False,
+        cmds.checkBox(self.uicbSnapHierarchy, l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False,
                                                ann=LANGUAGE_MAP._AnimationUI_.snaptransforms_hierarchy_ann,
                                                cc=self.__uiCB_manageSnapHierachy)
-        self.uicbStanRots = cmds.checkBox('uicbStanRots', l=LANGUAGE_MAP._AnimationUI_.rots, al='left', v=True,
+        cmds.checkBox(self.uicbStapRots, l=LANGUAGE_MAP._AnimationUI_.rots, al='left', v=True,
                                           ann='Track the Rotational data',
-                                          cc=lambda x: self.__uiCache_addCheckbox('uicbStanRots'))
-        self.uicbSnapPreCopyAttrs = cmds.checkBox(l=LANGUAGE_MAP._AnimationUI_.pre_copyattrs, al='left', en=False, v=True,
+                                          cc=lambda x: self.__uiCache_addCheckbox(self.uicbStapRots))
+        cmds.checkBox(self.uicbSnapPreCopyAttrs, l=LANGUAGE_MAP._AnimationUI_.pre_copyattrs, al='left', en=False, v=True,
                                                   ann=LANGUAGE_MAP._AnimationUI_.pre_copyattrs_ann)
-        self.uiifSnapIterations = cmds.intFieldGrp('uiifSnapIterations', l=LANGUAGE_MAP._AnimationUI_.iteration, en=False, value1=1, cw2=(45, 30),
+        cmds.intFieldGrp(self.uiifSnapIterations, l=LANGUAGE_MAP._AnimationUI_.iteration, en=False, value1=1, cw2=(45, 30),
                                            ann=LANGUAGE_MAP._AnimationUI_.iteration_ann)
 
         cmds.setParent(self.AnimLayout)
@@ -769,16 +914,16 @@ class AnimationUI(object):
         cmds.columnLayout(adjustableColumn=True)
         #cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 100), (2, 100), (3, 100)], columnSpacing=[(1, 10), (2, 10), (3, 5)])
         cmds.rowColumnLayout(numberOfColumns=4, columnWidth=[(1, 100), (2, 55), (3, 55), (4, 100)], columnSpacing=[(1, 10), (3, 5)])
-        self.uicbStabRange = cmds.checkBox('uicbStabRange', l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', v=False,
+        cmds.checkBox(self.uicbStabRange, l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.snaptransforms_timerange_ann,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbStabRange'))
-        self.uicbStabTrans = cmds.checkBox('uicbStabTrans', l=LANGUAGE_MAP._AnimationUI_.trans, al='left', v=True,
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbStabRange))
+        cmds.checkBox(self.uicbStabTrans, l=LANGUAGE_MAP._AnimationUI_.trans, al='left', v=True,
                                            ann=LANGUAGE_MAP._AnimationUI_.trans_ann,
-                                           cc=lambda x: self.__uiCache_addCheckbox('uicbStabTrans'))
-        self.uicbStabRots = cmds.checkBox('uicbStabRots', l=LANGUAGE_MAP._AnimationUI_.rots, al='left', v=True,
+                                           cc=lambda x: self.__uiCache_addCheckbox(self.uicbStabTrans))
+        cmds.checkBox(self.uicbStabRots, l=LANGUAGE_MAP._AnimationUI_.rots, al='left', v=True,
                                           ann=LANGUAGE_MAP._AnimationUI_.rots_ann,
-                                          cc=lambda x: self.__uiCache_addCheckbox('uicbStabRots'))
-        self.uiffgStabStep = cmds.floatFieldGrp('uiffgStabStep', l=LANGUAGE_MAP._AnimationUI_.step, value1=1, cw2=(40, 50),
+                                          cc=lambda x: self.__uiCache_addCheckbox(self.uicbStabRots))
+        cmds.floatFieldGrp(self.uiffgStabStep, l=LANGUAGE_MAP._AnimationUI_.step, value1=1, cw2=(40, 50),
                                               ann=LANGUAGE_MAP._AnimationUI_.step_ann)
         cmds.setParent('..')
         cmds.rowColumnLayout(numberOfColumns=2, columnWidth=[(1, 160), (2, 160)], columnSpacing=[(2, 2)])
@@ -799,51 +944,57 @@ class AnimationUI(object):
         cmds.columnLayout(adjustableColumn=True)
         #cmds.rowColumnLayout(numberOfColumns=4, columnWidth=[(1, 100), (2, 55), (3, 55), (4, 100)], columnSpacing=[(1, 10), (3, 5)])
         cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 100), (2, 100), (3, 100)], columnSpacing=[(1, 10), (2, 10), (3, 5)], rowSpacing=[(1,5),(2,5)])
-        self.uicbTimeOffsetHierarchy = cmds.checkBox('uicbTimeOffsetHierarchy',
+        cmds.checkBox(self.uicbTimeOffsetHierarchy,
                                             l=LANGUAGE_MAP._Generic_.hierarchy, al='left', en=True, v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.offset_hierarchy_ann,
-                                            ofc=partial(self.__uiCB_manageTimeOffsetChecks, 'Off'),
-                                            onc=partial(self.__uiCB_manageTimeOffsetChecks),
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbTimeOffsetHierarchy'))
-              
-        self.uicbTimeOffsetScene = cmds.checkBox('uicbTimeOffsetScene',
+                                            ofc=partial(self.__uiCB_manageTimeOffsetChecks, ''),
+                                            onc=partial(self.__uiCB_manageTimeOffsetChecks, 'Hier'))
+                                            #cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetHierarchy)) 
+        cmds.checkBox(self.uicbTimeOffsetScene,
                                             l=LANGUAGE_MAP._AnimationUI_.offset_fullscene,
                                             ann=LANGUAGE_MAP._AnimationUI_.offset_fullscene_ann,
                                             al='left', v=False,
-                                            ofc=partial(self.__uiCB_manageTimeOffsetChecks, 'Off'),
-                                            onc=partial(self.__uiCB_manageTimeOffsetChecks, 'Full'),
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbTimeOffsetScene'))
+                                            ofc=partial(self.__uiCB_manageTimeOffsetChecks, ''),
+                                            onc=partial(self.__uiCB_manageTimeOffsetChecks, 'Full'))
+                                            #cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetScene))
         
-        self.uicbTimeOffsetPlayback = cmds.checkBox('uicbTimeOffsetTimelines', l=LANGUAGE_MAP._AnimationUI_.offset_timelines,
+        cmds.checkBox(self.uicbTimeOffsetPlayback, l=LANGUAGE_MAP._AnimationUI_.offset_timelines,
                                             ann=LANGUAGE_MAP._AnimationUI_.offset_timelines_ann,
                                             al='left', v=False, en=False,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbTimeOffsetTimelines'))
-
-        self.uicbTimeOffsetRange = cmds.checkBox('uicbTimeOffsetRange',
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetPlayback))
+        cmds.checkBox(self.uicbTimeOffsetRange,
                                             l=LANGUAGE_MAP._AnimationUI_.timerange, al='left', en=True, v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.offset_timerange_ann,
-                                            ofc=partial(self.__uiCB_manageTimeOffsetChecks, 'Ripple'),
-                                            onc=partial(self.__uiCB_manageTimeOffsetChecks, 'Ripple'),
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbTimeOffsetRange'))
-        self.uicbTimeOffsetFlocking = cmds.checkBox('uicbTimeOffsetFlocking',
+                                            cc=partial(self.__uiCB_manageTimeOffsetChecks, 'Timerange'))
+        cmds.checkBox(self.uicbTimeOffsetFlocking,
                                             l=LANGUAGE_MAP._AnimationUI_.offset_flocking, al='left', en=True, v=False,
-                                            ann=LANGUAGE_MAP._AnimationUI_.offset_flocking_ann)
-        self.uicbTimeOffsetRandom = cmds.checkBox('uicbTimeOffsetRandom', l=LANGUAGE_MAP._AnimationUI_.offset_randomizer,
+                                            ann=LANGUAGE_MAP._AnimationUI_.offset_flocking_ann,
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetFlocking))   
+        cmds.checkBox(self.uicbTimeOffsetRandom, l=LANGUAGE_MAP._AnimationUI_.offset_randomizer,
                                             ann=LANGUAGE_MAP._AnimationUI_.offset_randomizer_ann,
-                                            al='left', v=False)
-        self.uicbTimeOffsetRipple = cmds.checkBox('uicbTimeOffsetRipple', l=LANGUAGE_MAP._AnimationUI_.offset_ripple,
-                                            ann=LANGUAGE_MAP._AnimationUI_.offset_ripple_ann,
                                             al='left', v=False,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbTimeOffsetRipple'))
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetRandom))   
+        cmds.checkBox(self.uicbTimeOffsetRipple, l=LANGUAGE_MAP._AnimationUI_.offset_ripple,
+                                            ann=LANGUAGE_MAP._AnimationUI_.offset_ripple_ann,
+                                            al='left', v=False,  en=False,
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetRipple))
+        cmds.checkBox(self.uicbTimeOffsetStartfrm, l=LANGUAGE_MAP._AnimationUI_.offset_startfrm,
+                                            ann=LANGUAGE_MAP._AnimationUI_.offset_startfrm_ann,
+                                            al='left', v=False, en=False,
+                                            ofc=partial(self.__uiCB_manageTimeOffsetChecks),
+                                            onc=partial(self.__uiCB_manageTimeOffsetChecks),
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbTimeOffsetStartfrm))     
+        
+        
         cmds.separator(style='none')
         cmds.setParent('..')
         cmds.separator(h=2, style='none')
-        cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 250), (2, 60)], columnSpacing=[(2, 5)])
-       
-        cmds.button(label=LANGUAGE_MAP._AnimationUI_.offset, bgc=self.buttonBgc,
+               
+        cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 250), (2, 60)], columnSpacing=[(2, 5)]) 
+        cmds.button(self.uibtnTimeOffset, label=LANGUAGE_MAP._AnimationUI_.offsetby, bgc=self.buttonBgc,
                      ann=LANGUAGE_MAP._AnimationUI_.offset_ann,
                      command=partial(self.__uiCall, 'TimeOffset'))
-        self.uiffgTimeOffset = cmds.floatFieldGrp('uiffgTimeOffset', value1=1, ann=LANGUAGE_MAP._AnimationUI_.offset_frms_ann)
+        cmds.floatFieldGrp(self.uiffgTimeOffset, value1=1, ann=LANGUAGE_MAP._AnimationUI_.offset_frms_ann)
         cmds.setParent(self.AnimLayout)
         
         
@@ -855,10 +1006,10 @@ class AnimationUI(object):
         cmds.columnLayout(adjustableColumn=True)
 
         cmds.rowColumnLayout(numberOfColumns=3, columnWidth=[(1, 100), (2, 100), (3, 100)], columnSpacing=[(1, 10), (2, 10), (3, 5)])
-        self.uicbMirrorHierarchy = cmds.checkBox('uicbMirrorHierarchy',
+        cmds.checkBox(self.uicbMirrorHierarchy,
                                             l=LANGUAGE_MAP._Generic_.hierarchy, al='left', en=True, v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.mirror_hierarchy_ann,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbMirrorHierarchy'))
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbMirrorHierarchy))
               
         cmds.setParent('..')
         
@@ -893,19 +1044,17 @@ class AnimationUI(object):
         cmds.separator(h=20, style='in')
                                           
         # This bit is bullshit! the checkBox align flag is now obsolete so the label is always on the left regardless :(
-        self.uiclHierarchyFilters = cmds.columnLayout('uiclHierarchyFilters', adjustableColumn=True, enable=True)
+        cmds.columnLayout(self.uiclHierarchyFilters, adjustableColumn=True, enable=True)
         cmds.rowColumnLayout(numberOfColumns=2, columnWidth=[(1, 120), (2, 200)], columnSpacing=[2, 3])
         cmds.text(label=LANGUAGE_MAP._AnimationUI_.metarig, align='right')
-        self.uicbMetaRig = cmds.checkBox('uicbMetaRig',
-                                          ann=LANGUAGE_MAP._AnimationUI_.metarig_ann,
-                                          l='',
-                                          v=True,
-                                          cc=lambda x: self.__uiCB_managePoseRootMethod('uicbMetaRig'))
+        cmds.checkBox(self.uicbMetaRig, ann=LANGUAGE_MAP._AnimationUI_.metarig_ann,
+                                        l='',
+                                        v=True,
+                                        cc=lambda x: self.__uiCB_managePoseRootMethod(self.uicbMetaRig))
         cmds.setParent(self.uiclHierarchyFilters)
         
-        self.uitfgSpecificNodeTypes = cmds.textFieldGrp('uitfgSpecificNodeTypes',
-                                            label=LANGUAGE_MAP._AnimationUI_.search_nodetypes, text="", cw2=(120, 200),
-                                            ann=LANGUAGE_MAP._AnimationUI_.search_nodetypes_ann)
+        cmds.textFieldGrp(self.uitfgSpecificNodeTypes, label=LANGUAGE_MAP._AnimationUI_.search_nodetypes, 
+                          text="", cw2=(120, 200), ann=LANGUAGE_MAP._AnimationUI_.search_nodetypes_ann)
         cmds.popupMenu()
         cmds.menuItem(label=LANGUAGE_MAP._Generic_.clear_all, command=partial(self.__uiCB_addToNodeTypes, 'clearAll'))
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.nodetype_transform, command=partial(self.__uiCB_addToNodeTypes, 'transform'))
@@ -917,15 +1066,14 @@ class AnimationUI(object):
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.nodetype_cameras, command=partial(self.__uiCB_addToNodeTypes, 'camera'))
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.nodetype_hikeff, command=partial(self.__uiCB_addToNodeTypes, 'hikIKEffector'))
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.nodetype_blendshape, command=partial(self.__uiCB_addToNodeTypes, 'blendShape'))
-        self.uitfgSpecificAttrs = cmds.textFieldGrp('uitfgSpecificAttrs',
-                                            label=LANGUAGE_MAP._AnimationUI_.search_attributes, text="", cw2=(120, 200),
-                                            ann=LANGUAGE_MAP._AnimationUI_.search_attributes_ann)
-        self.uitfgSpecificPattern = cmds.textFieldGrp('uitfgSpecificPattern',
-                                            label=LANGUAGE_MAP._AnimationUI_.search_pattern, text="", cw2=(120, 200),
-                                            ann=LANGUAGE_MAP._AnimationUI_.search_pattern_ann)
+        cmds.textFieldGrp(self.uitfgSpecificAttrs, label=LANGUAGE_MAP._AnimationUI_.search_attributes, 
+                          text="", cw2=(120, 200), ann=LANGUAGE_MAP._AnimationUI_.search_attributes_ann)
+        cmds.textFieldGrp(self.uitfgSpecificPattern,
+                                    label=LANGUAGE_MAP._AnimationUI_.search_pattern, text="", cw2=(120, 200),
+                                    ann=LANGUAGE_MAP._AnimationUI_.search_pattern_ann)
         cmds.separator(h=5, style='none')
         cmds.text('Internal Node Priorities:')
-        self.uitslFilterPriority = cmds.textScrollList('uitslFilterPriority', numberOfRows=8, allowMultiSelection=False,
+        cmds.textScrollList(self.uitslFilterPriority, numberOfRows=8, allowMultiSelection=False,
                                                height=60, enable=True, append=self.filterSettings.filterPriority)
         cmds.popupMenu()
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.priorities_clear, command=lambda x: self.__uiSetPriorities('clear'))
@@ -935,13 +1083,13 @@ class AnimationUI(object):
         cmds.menuItem(divider=True)
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.move_up, command=lambda x: self.__uiSetPriorities('moveUp'))
         cmds.menuItem(label=LANGUAGE_MAP._AnimationUI_.move_down, command=lambda x: self.__uiSetPriorities('moveDown'))
-        self.uicbSnapPriorityOnly = cmds.checkBox('uicbSnapPriorityOnly', v=False,
+        cmds.checkBox(self.uicbSnapPriorityOnly, v=False,
                                                 label=LANGUAGE_MAP._AnimationUI_.priorities_use_snap,
                                                 onc=self.__uiCB_setPriorityFlag,
                                                 cc=lambda x: self.__uiCache_addCheckbox('uicbSnapPriorityOnly'))
         cmds.separator(h=20, style='in')
         cmds.text(LANGUAGE_MAP._AnimationUI_.presets_available)
-        self.uitslPresets = cmds.textScrollList(numberOfRows=8, allowMultiSelection=False,
+        cmds.textScrollList(self.uitslPresets, numberOfRows=8, allowMultiSelection=False,
                                                selectCommand=partial(self.__uiPresetSelection),
                                                height=110)
         cmds.popupMenu()
@@ -956,11 +1104,10 @@ class AnimationUI(object):
             cmds.text('filterSettingsInfo', label='')
         cmds.separator('filterInfoBase', style='in', vis=False)
         cmds.rowColumnLayout(numberOfColumns=2, columnWidth=[(1, 140), (2, 180)])
-        self.uicbIncRoots = cmds.checkBox('uicbIncRoots',
-                                            ann='include RootNodes in the Filter',
-                                            l=LANGUAGE_MAP._AnimationUI_.include_roots,
-                                            al='left', v=True,
-                                            cc=self.__uiCache_storeUIElements)
+        cmds.checkBox(self.uicbIncRoots, ann='include RootNodes in the Filter',
+                                        l=LANGUAGE_MAP._AnimationUI_.include_roots,
+                                        al='left', v=True,
+                                        cc=self.__uiCache_storeUIElements)
         
         cmds.optionMenu('om_MatchMethod', label=LANGUAGE_MAP._AnimationUI_.match_method, w=70,
                         ann=LANGUAGE_MAP._AnimationUI_.match_method_ann,
@@ -970,7 +1117,7 @@ class AnimationUI(object):
         cmds.menuItem(l=LANGUAGE_MAP._AnimationUI_.match_stripprefix, ann=LANGUAGE_MAP._AnimationUI_.match_stripprefix_ann)
         cmds.menuItem(l=LANGUAGE_MAP._AnimationUI_.match_index, ann=LANGUAGE_MAP._AnimationUI_.match_index_ann)
         cmds.menuItem(l=LANGUAGE_MAP._AnimationUI_.match_mirror, ann=LANGUAGE_MAP._AnimationUI_.match_mirror_ann)
-        
+        cmds.menuItem(l=LANGUAGE_MAP._AnimationUI_.match_metadata, ann=LANGUAGE_MAP._AnimationUI_.match_metadata_ann)   
         cmds.optionMenu('om_MatchMethod', e=True, v='stripPrefix')
 
         cmds.setParent(self.FilterLayout)
@@ -994,7 +1141,7 @@ class AnimationUI(object):
         
         self.poseUILayout = cmds.columnLayout(adjustableColumn=True)
         cmds.separator(h=10, style='none')
-        self.uitfgPosePath = cmds.textFieldButtonGrp('uitfgPosePath',
+        cmds.textFieldButtonGrp(self.uitfgPosePath,
                                             ann=LANGUAGE_MAP._AnimationUI_.pose_path,
                                             text="",
                                             bl=LANGUAGE_MAP._AnimationUI_.pose_path,
@@ -1030,15 +1177,15 @@ class AnimationUI(object):
         cmds.separator(h=10, style='in')
         cmds.rowColumnLayout(nc=3, columnWidth=[(1, 260), (2, 22), (3, 22)], columnSpacing=[(2,20)])
         if r9Setup.mayaVersion() > 2012:  # tcc flag not supported in earlier versions
-            self.searchFilter = cmds.textFieldGrp('tfPoseSearchFilter', label=LANGUAGE_MAP._AnimationUI_.search_filter, text='',
+            self.searchFilter = cmds.textFieldGrp(self.tfPoseSearchFilter, label=LANGUAGE_MAP._AnimationUI_.search_filter, text='',
                                                 cw=((1, 87), (2, 160)),
                                                 ann=LANGUAGE_MAP._AnimationUI_.search_filter_ann,
-                                                tcc=lambda x: self.__uiCB_fillPoses(searchFilter=cmds.textFieldGrp('tfPoseSearchFilter', q=True, text=True)))
+                                                tcc=lambda x: self.__uiCB_fillPoses(searchFilter=cmds.textFieldGrp(self.tfPoseSearchFilter, q=True, text=True)))
         else:
-            self.searchFilter = cmds.textFieldGrp('tfPoseSearchFilter', label=LANGUAGE_MAP._AnimationUI_.search_filter, text='',
+            self.searchFilter = cmds.textFieldGrp(self.tfPoseSearchFilter, label=LANGUAGE_MAP._AnimationUI_.search_filter, text='',
                                                 cw=((1, 87), (2, 160)), fcc=True,
                                                 ann=LANGUAGE_MAP._AnimationUI_.search_filter_ann,
-                                                cc=lambda x: self.__uiCB_fillPoses(searchFilter=cmds.textFieldGrp('tfPoseSearchFilter', q=True, text=True)))
+                                                cc=lambda x: self.__uiCB_fillPoses(searchFilter=cmds.textFieldGrp(self.tfPoseSearchFilter, q=True, text=True)))
         
         cmds.iconTextButton('sortByName', style='iconOnly', image1='sortByName.bmp',
                             w=22, h=20, ann=LANGUAGE_MAP._AnimationUI_.sortby_name,
@@ -1052,25 +1199,25 @@ class AnimationUI(object):
         cmds.separator(h=10, style='none')
         
         # SubFolder Scroller
-        self.uitslPoseSubFolders = cmds.textScrollList('uitslPoseSubFolders', numberOfRows=8,
+        cmds.textScrollList(self.uitslPoseSubFolders, numberOfRows=8,
                                                        allowMultiSelection=False,
                                                        height=350, vis=False)
         
         # Main PoseFields
-        self.uitslPoses = cmds.textScrollList('uitslPoses', numberOfRows=8, allowMultiSelection=False,
+        cmds.textScrollList(self.uitslPoses, numberOfRows=8, allowMultiSelection=False,
                                                #selectCommand=partial(self.__uiPresetSelection), \
                                                height=350, vis=False)
         self.posePopupText = cmds.popupMenu()
         
-        self.uiglPoseScroll = cmds.scrollLayout('uiglPoseScroll',
+        cmds.scrollLayout(self.uiglPoseScroll,
                                                 cr=True,
                                                 height=350,
                                                 hst=16,
                                                 vst=16,
                                                 vis=False,
                                                 rc=self.__uiCB_gridResize)
-        self.uiglPoses = cmds.gridLayout('uiglPoses', cwh=(100, 100), cr=False, ag=True)
-        self.posePopupGrid = cmds.popupMenu()
+        cmds.gridLayout(self.uiglPoses, cwh=(100, 100), cr=False, ag=True)
+        self.posePopupGrid = cmds.popupMenu('posePopupGrid')
         
         cmds.setParent(self.poseUILayout)
         cmds.rowColumnLayout(numberOfColumns=2, columnWidth=[(1, 162), (2, 162)])
@@ -1083,11 +1230,11 @@ class AnimationUI(object):
         cmds.setParent(self.poseUILayout)
         cmds.separator(h=10, style='in')
         cmds.rowColumnLayout(numberOfColumns=2, columnWidth=[(1, 80), (2, 250)])
-        self.uicbPoseHierarchy = cmds.checkBox('uicbPoseHierarchy',
+        cmds.checkBox(self.uicbPoseHierarchy,
                                             l=LANGUAGE_MAP._Generic_.hierarchy, al='left', en=True, v=False,
                                             ann=LANGUAGE_MAP._AnimationUI_.pose_hierarchy_ann,
-                                            cc=lambda x: self.__uiCache_addCheckbox('uicbPoseHierarchy'))
-        self.uitfgPoseRootNode = cmds.textFieldButtonGrp('uitfgPoseRootNode',
+                                            cc=lambda x: self.__uiCache_addCheckbox(self.uicbPoseHierarchy))
+        cmds.textFieldButtonGrp(self.uitfgPoseRootNode,
                                             ann=LANGUAGE_MAP._AnimationUI_.pose_set_root_ann,
                                             text="",
                                             bl=LANGUAGE_MAP._AnimationUI_.pose_set_root,
@@ -1097,15 +1244,15 @@ class AnimationUI(object):
         cmds.setParent(self.poseUILayout)
         cmds.separator(h=10, style='in')
         cmds.rowColumnLayout(nc=2, columnWidth=[(1, 120), (2, 160)])
-        self.uicbPoseRelative = cmds.checkBox('uicbPoseRelative',
+        cmds.checkBox(self.uicbPoseRelative,
                                             l=LANGUAGE_MAP._AnimationUI_.pose_relative, al='left', en=True, v=False,
                                             cc=self.__uiCB_enableRelativeSwitches)
-        self.uicbPoseSpace = cmds.checkBox('uicbPoseSpace',
+        cmds.checkBox(self.uicbPoseSpace,
                                             l=LANGUAGE_MAP._AnimationUI_.pose_maintain_parents, al='left', en=True, v=False,
-                                            cc=lambda *x: self.__uiCache_addCheckbox('uicbPoseSpace'))
+                                            cc=lambda *x: self.__uiCache_addCheckbox(self.uicbPoseSpace))
         cmds.setParent(self.poseUILayout)
         cmds.separator(h=5, style='none')
-        self.uiflPoseRelativeFrame = cmds.frameLayout('PoseRelativeFrame', label=LANGUAGE_MAP._AnimationUI_.pose_rel_methods, cll=True, en=False)
+        cmds.frameLayout(self.uiflPoseRelativeFrame, label=LANGUAGE_MAP._AnimationUI_.pose_rel_methods, cll=True, en=False)
         cmds.rowColumnLayout(nc=3, columnWidth=[(1, 120), (2, 80), (3, 80)])
         
         self.uircbPoseRotMethod = cmds.radioCollection('relativeRotate')
@@ -1121,7 +1268,7 @@ class AnimationUI(object):
         cmds.radioCollection(self.uircbPoseRotMethod, edit=True, select='rotProjected')
         cmds.radioCollection(self.uircbPoseTranMethod, edit=True, select='tranProjected')
         
-        self.uiflPosePointFrame = cmds.frameLayout('PosePointCloud', label='Pose Point Cloud', cll=True, cl=True, en=True)
+        cmds.frameLayout('PosePointCloud', label='Pose Point Cloud', cll=True, cl=True, en=True)
         cmds.rowColumnLayout(nc=4, columnWidth=[(1, 80), (2, 80), (3, 80), (4, 80)])
         cmds.button(label=LANGUAGE_MAP._AnimationUI_.pose_pp_make, bgc=self.buttonBgc,
                      ann=LANGUAGE_MAP._AnimationUI_.pose_pp_make_ann,
@@ -1152,38 +1299,35 @@ class AnimationUI(object):
                              c=lambda * args: (r9Setup.red9ContactInfo()), h=22, w=340)
         
         # needed for 2009
-        cmds.scrollLayout('uiglPoseScroll', e=True, h=330)
+        cmds.scrollLayout(self.uiglPoseScroll, e=True, h=330)
         
-        #====================
-        # Show and Dock
-        #====================
-            
-        if self.dock:
-            try:
-                # Maya2011 QT docking
-                cmds.dockControl(self.dockCnt, area='right', label=self.label,
-                                 content=animwindow,
-                                 floating=False,
-                                 allowedArea=['right', 'left'],
-                                 width=350)
-            except:
-                # Dock failed, opening standard Window
+        #====================================
+        # Show and Dock - 2016 and below only
+        #====================================
+        
+        if not r9Setup.mayaVersion()>=2017:
+            if self.dock:
+                try:
+                    # Maya2011 QT docking
+                    cmds.dockControl(self.dockCnt, area='right', label=self.label,
+                                     content=animwindow,
+                                     floating=False,
+                                     allowedArea=['right', 'left'],
+                                     width=350)
+                except:
+                    # Dock failed, opening standard Window
+                    cmds.showWindow(animwindow)
+                    cmds.window(self.win, edit=True, widthHeight=(355, 720))
+                    self.dock = False
+            else:
                 cmds.showWindow(animwindow)
                 cmds.window(self.win, edit=True, widthHeight=(355, 720))
-                self.dock = False
-        else:
-            cmds.showWindow(animwindow)
-            cmds.window(self.win, edit=True, widthHeight=(355, 720))
 
-            
-        #Set the initial Interface up
+        # set the initial Interface up
         self.__uiPresetsUpdate()
         self.__uiPresetReset()
         self.__uiCache_loadUIElements()
-        #self.jobOnDelete=cmds.scriptJob(uiDeleted=(self.win, self.__uicloseEvent), runOnce=1)
-#         if not self.dock:
-#             cmds.dockControl(self.dockCnt, edit=True, floating=True)
-#             cmds.dockControl(self.dockCnt, edit=True, width=360, height=740)
+
 
     #------------------------------------------------------------------------------
     # UI Callbacks ---
@@ -1196,9 +1340,9 @@ class AnimationUI(object):
         val = False
         if cmds.checkBox(self.uicbSnapHierarchy, q=True, v=True):
             val=True
-        cmds.intFieldGrp('uiifSnapIterations', e=True, en=val)
+        cmds.intFieldGrp(self.uiifSnapIterations, e=True, en=val)
         cmds.checkBox(self.uicbSnapPreCopyAttrs, e=True, en=val)
-        self.__uiCache_addCheckbox('uicbSnapHierarchy')
+        self.__uiCache_addCheckbox(self.uicbSnapHierarchy)
             
     def __uiCB_manageSnapTime(self, *args):
         '''
@@ -1208,30 +1352,56 @@ class AnimationUI(object):
         if cmds.checkBox(self.uicbSnapRange, q=True, v=True):
             val=True
         cmds.checkBox(self.uicbSnapPreCopyKeys, e=True, en=val)
-        cmds.intFieldGrp('uiifgSnapStep', e=True, en=val)
-        self.__uiCache_addCheckbox('uicbSnapRange')
-        
-    def __uiCB_manageTimeOffsetChecks(self, *args):
+        cmds.intFieldGrp(self.uiifgSnapStep, e=True, en=val)
+        self.__uiCache_addCheckbox(self.uicbSnapRange)
+    
+    def __uiCB_manageTimeOffsetChecks(self, mode, *args):
         '''
-        Manage timeOffset checks
+        manage time mode switches
         '''
-        if args[0] == 'Full':
-            cmds.checkBox(self.uicbTimeOffsetHierarchy, e=True, v=False)
-            cmds.checkBox(self.uicbTimeOffsetPlayback, e=True, en=True)
+        if cmds.checkBox(self.uicbTimeOffsetStartfrm, q=True, v=False) and cmds.checkBox(self.uicbTimeOffsetRange, q=True, v=True):
+            cmds.button(self.uibtnTimeOffset, e=True, l=LANGUAGE_MAP._AnimationUI_.offset_start)
+        else:
+            cmds.button(self.uibtnTimeOffset, e=True, l=LANGUAGE_MAP._AnimationUI_.offsetby)
+
+        if any([mode=='Full', mode=='Hier', mode=='Timerange']):
+            # selected base flags
+            cmds.checkBox(self.uicbTimeOffsetPlayback, e=True, en=False)
             cmds.checkBox(self.uicbTimeOffsetFlocking, e=True, en=False)
             cmds.checkBox(self.uicbTimeOffsetRandom, e=True, en=False)
-            cmds.checkBox(self.uicbTimeOffsetRange, e=True, en=True)  # en=False)
-        elif args[0] == 'Ripple':
-            if cmds.checkBox(self.uicbTimeOffsetRange, q=True, v=True):
-                cmds.checkBox(self.uicbTimeOffsetRipple, e=True, en=True)
-            else:
-                cmds.checkBox(self.uicbTimeOffsetRipple, e=True, en=False)
-        else:
-            cmds.checkBox(self.uicbTimeOffsetPlayback, e=True, en=False)
-            cmds.checkBox(self.uicbTimeOffsetScene, e=True, v=False)
-            cmds.checkBox(self.uicbTimeOffsetFlocking, e=True, en=True)
-            cmds.checkBox(self.uicbTimeOffsetRandom, e=True, en=True)
-            cmds.checkBox(self.uicbTimeOffsetRange, e=True, en=True)
+                 
+            # switch main mode
+            if mode == 'Full':
+                cmds.checkBox(self.uicbTimeOffsetHierarchy, e=True, v=False)
+                cmds.checkBox(self.uicbTimeOffsetPlayback, e=True, en=True)
+                cmds.checkBox(self.uicbTimeOffsetFlocking, e=True, en=False)
+                cmds.checkBox(self.uicbTimeOffsetRandom, e=True, en=False)
+            elif mode == 'Hier':
+                cmds.checkBox(self.uicbTimeOffsetScene, e=True, v=False)
+                cmds.checkBox(self.uicbTimeOffsetPlayback, e=True, en=False)
+                cmds.checkBox(self.uicbTimeOffsetFlocking, e=True, en=True)
+                cmds.checkBox(self.uicbTimeOffsetRandom, e=True, en=True)    
+            elif mode == 'Timerange':
+                if cmds.checkBox(self.uicbTimeOffsetRange, q=True, v=True):
+                    cmds.checkBox(self.uicbTimeOffsetRipple, e=True, en=True)
+                    cmds.checkBox(self.uicbTimeOffsetStartfrm, e=True, en=True)
+                else:
+                    cmds.checkBox(self.uicbTimeOffsetRipple, e=True, en=False)
+                    cmds.checkBox(self.uicbTimeOffsetStartfrm, e=True, en=False)
+            
+            self.__uiCache_addCheckbox(self.uicbTimeOffsetHierarchy)
+            self.__uiCache_addCheckbox(self.uicbTimeOffsetScene)  
+            self.__uiCache_addCheckbox(self.uicbTimeOffsetRange)  
+    
+    def __uiCB_manageTimeOffsetState(self, *args):
+        '''
+        Manage timeOffset initial state
+        '''
+        if cmds.checkBox(self.uicbTimeOffsetHierarchy, q=True, v=True):
+            self.__uiCB_manageTimeOffsetChecks('Heir')
+        elif cmds.checkBox(self.uicbTimeOffsetScene, q=True, v=True):
+            self.__uiCB_manageTimeOffsetChecks('Full')
+        self.__uiCB_manageTimeOffsetChecks('Timerange')
         
     def __uiCB_addToNodeTypes(self, nodeType, *args):
         '''
@@ -1253,14 +1423,20 @@ class AnimationUI(object):
         cmds.textFieldGrp('uitfgSpecificNodeTypes', e=True, text=','.join(nodeTypes))
  
     def __uiCB_resizeMainScroller(self, *args):
-        if self.dock:
-            #if not cmds.dockControl(self.dockCnt, query=True, floating=True):
-            width=cmds.dockControl(self.dockCnt, q=True, w=True)
-            height=cmds.dockControl(self.dockCnt, q=True, h=True)
+        if not r9Setup.mayaVersion()>=2017:
+            if self.dock:
+                #if not cmds.dockControl(self.dockCnt, query=True, floating=True):
+                width=cmds.dockControl(self.dockCnt, q=True, w=True)
+                height=cmds.dockControl(self.dockCnt, q=True, h=True)
+                print 'width self.dockCnt:', cmds.dockControl(self.dockCnt, q=True, w=True)
+            else:
+                newSize=cmds.window(self.win, q=True, wh=True)
+                width=newSize[0]
+                height=newSize[1]
         else:
-            newSize=cmds.window(self.win, q=True, wh=True)
-            width=newSize[0]
-            height=newSize[1]
+            width=cmds.workspaceControl(self.workspaceCnt, q=True, width=True)
+            height=cmds.workspaceControl(self.workspaceCnt, q=True, height=True)
+            
         if width>350:
             #cmds.scrollLayout(self.MainLayout, e=True, w=width) #new?
             cmds.formLayout(self.form, edit=True, w=width-10)
@@ -1269,12 +1445,11 @@ class AnimationUI(object):
             cmds.scrollLayout(self.MainLayout, e=True, w=350)
             
         if height>440:  # 440 
-            cmds.scrollLayout('uiglPoseScroll', e=True, h=max(height-430, 200))
+            cmds.scrollLayout(self.uiglPoseScroll, e=True, h=max(height-430, 200))
         
-        print 'width self.dockCnt:', cmds.dockControl(self.dockCnt, q=True, w=True)
-        print 'width self.MainLayout:', cmds.scrollLayout(self.MainLayout, q=True, w=True)
-        print 'width self.form:', cmds.formLayout(self.form, q=True, w=True)
-        print 'width poseScroll:', cmds.scrollLayout('uiglPoseScroll', q=True, w=True)
+            print 'width self.MainLayout:', cmds.scrollLayout(self.MainLayout, q=True, w=True)
+            print 'width self.form:', cmds.formLayout(self.form, q=True, w=True)
+            print 'width poseScroll:', cmds.scrollLayout(self.uiglPoseScroll, q=True, w=True)
                                 
     def __uiCB_setCopyKeyPasteMethod(self, *args):
         self.ANIM_UI_OPTVARS['AnimationUI']['keyPasteMethod'] = cmds.optionMenu('om_PasteMethod', q=True, v=True)
@@ -1561,7 +1736,7 @@ class AnimationUI(object):
             self.posePathMode = 'localPoseMode'
             if self.poseProjectMute:
                 cmds.button('savePoseButton', edit=True, en=True, bgc=r9Setup.red9ButtonBGC(1))
-            cmds.textFieldButtonGrp('uitfgPosePath', edit=True, text=self.posePathLocal)
+            cmds.textFieldButtonGrp(self.uitfgPosePath, edit=True, text=self.posePathLocal)
             
         elif mode == 'project' or mode =='projectPoseMode':
             self.posePath = os.path.join(self.posePathProject, self.getPoseSubFolder())
@@ -1573,8 +1748,8 @@ class AnimationUI(object):
             self.posePathMode = 'projectPoseMode'
             if self.poseProjectMute:
                 cmds.button('savePoseButton', edit=True, en=False, bgc=r9Setup.red9ButtonBGC(2))
-            cmds.textFieldButtonGrp('uitfgPosePath', edit=True, text=self.posePathProject)
-        cmds.scrollLayout('uiglPoseScroll', edit=True, sp='up')  # scroll the layout to the top!
+            cmds.textFieldButtonGrp(self.uitfgPosePath, edit=True, text=self.posePathProject)
+        cmds.scrollLayout(self.uiglPoseScroll, edit=True, sp='up')  # scroll the layout to the top!
         
         self.ANIM_UI_OPTVARS['AnimationUI']['posePathMode'] = self.posePathMode
         self.__uiCB_fillPoses(rebuildFileList=True)
@@ -1587,7 +1762,7 @@ class AnimationUI(object):
             try:
                 if r9Setup.mayaVersion()>=2011:
                     self.posePath=cmds.fileDialog2(fileMode=3,
-                                                dir=cmds.textFieldButtonGrp('uitfgPosePath',
+                                                dir=cmds.textFieldButtonGrp(self.uitfgPosePath,
                                                 q=True,
                                                 text=True))[0]
                 else:
@@ -1599,11 +1774,11 @@ class AnimationUI(object):
                 log.warning('No Folder Selected or Given')
         else:
             if not path:
-                self.posePath=cmds.textFieldButtonGrp('uitfgPosePath', q=True, text=True)
+                self.posePath=cmds.textFieldButtonGrp(self.uitfgPosePath, q=True, text=True)
             else:
                 self.posePath=path
                 
-        cmds.textFieldButtonGrp('uitfgPosePath', edit=True, text=self.posePath)
+        cmds.textFieldButtonGrp(self.uitfgPosePath, edit=True, text=self.posePath)
         cmds.textFieldButtonGrp('uitfgPoseSubPath', edit=True, text="")
         #internal cache for the 2 path modes
         if self.posePathMode=='localPoseMode':
@@ -1633,7 +1808,7 @@ class AnimationUI(object):
         switch the scroller from pose mode to subFolder select mode
         note we prefix the folder with '/' to help denote it's a folder in the UI
         '''
-        basePath=cmds.textFieldButtonGrp('uitfgPosePath', query=True, text=True)
+        basePath=cmds.textFieldButtonGrp(self.uitfgPosePath, query=True, text=True)
         
         #turn OFF the 2 main poseScrollers
         cmds.textScrollList(self.uitslPoses, edit=True, vis=False)
@@ -1659,7 +1834,7 @@ class AnimationUI(object):
         '''
         Select a subFolder from the scrollList and update the systems
         '''
-        basePath = cmds.textFieldButtonGrp('uitfgPosePath', query=True, text=True)
+        basePath = cmds.textFieldButtonGrp(self.uitfgPosePath, query=True, text=True)
         subFolder = cmds.textScrollList(self.uitslPoseSubFolders, q=True, si=True)[0].split('/')[-1]
         
         cmds.textFieldButtonGrp('uitfgPoseSubPath', edit=True, text=subFolder)
@@ -1691,7 +1866,7 @@ class AnimationUI(object):
         '''
         Return the poseDir including subPath
         '''
-        return os.path.join(cmds.textFieldButtonGrp('uitfgPosePath', query=True, text=True),
+        return os.path.join(cmds.textFieldButtonGrp(self.uitfgPosePath, query=True, text=True),
                             self.getPoseSubFolder())
         
     def getPosePath(self):
@@ -1714,7 +1889,7 @@ class AnimationUI(object):
         # Store the current mode to the Cache File
         self.ANIM_UI_OPTVARS['AnimationUI']['poseMode'] = self.poseGridMode
         self.__uiCache_storeUIElements()
-        searchFilter = cmds.textFieldGrp('tfPoseSearchFilter', q=True, text=True)
+        searchFilter = cmds.textFieldGrp(self.tfPoseSearchFilter, q=True, text=True)
 
         if rebuildFileList:
             self.buildPoseList(sortBy=sortBy)
@@ -1735,7 +1910,7 @@ class AnimationUI(object):
             cmds.textScrollList(self.uitslPoses, edit=True, ra=True)  # clear textScroller
             
             if searchFilter:
-                cmds.scrollLayout('uiglPoseScroll', edit=True, sp='up')
+                cmds.scrollLayout(self.uiglPoseScroll, edit=True, sp='up')
                 
             for pose in r9Core.filterListByString(self.poses, searchFilter, matchcase=False):  # self.buildFilteredPoseList(searchFilter):
                 cmds.textScrollList(self.uitslPoses, edit=True,
@@ -1771,7 +1946,7 @@ class AnimationUI(object):
              
             if searchFilter:
                 #with search scroll the list to the top as results may seem blank otherwise
-                cmds.scrollLayout('uiglPoseScroll', edit=True, sp='up')
+                cmds.scrollLayout(self.uiglPoseScroll, edit=True, sp='up')
           
         # Finally Bind the Popup-menu
         self.__uiCB_PosePopup()
@@ -1901,8 +2076,8 @@ class AnimationUI(object):
         
     def __uiCB_gridResize(self, *args):
         if r9Setup.mayaVersion() >= 2010:
-            cells = int(cmds.scrollLayout('uiglPoseScroll', q=True, w=True) / cmds.gridLayout('uiglPoses', q=True, cw=True))
-            cmds.gridLayout('uiglPoses', e=True, nc=cells)
+            cells = int(cmds.scrollLayout(self.uiglPoseScroll, q=True, w=True) / cmds.gridLayout(self.uiglPoses, q=True, cw=True))
+            cmds.gridLayout(self.uiglPoses, e=True, nc=cells)
         else:
             log.debug('this call FAILS in 2009???')
     
@@ -1950,7 +2125,7 @@ class AnimationUI(object):
         
         def fillTextField(text):
             #bound to a function so it can be passed onto the MetaNoode selector UI
-            cmds.textFieldButtonGrp('uitfgPoseRootNode', e=True, text=text)
+            cmds.textFieldButtonGrp(self.uitfgPoseRootNode, e=True, text=text)
             
         if self.poseRootMode=='RootNode':
             if not rootNode:
@@ -1974,7 +2149,7 @@ class AnimationUI(object):
                     
                     raise StandardError("Warning: No MetaRigs found in the Scene")
         #fill the cache up for the ini file
-        self.ANIM_UI_OPTVARS['AnimationUI']['poseRoot']=cmds.textFieldButtonGrp('uitfgPoseRootNode', q=True, text=True)
+        self.ANIM_UI_OPTVARS['AnimationUI']['poseRoot']=cmds.textFieldButtonGrp(self.uitfgPoseRootNode, q=True, text=True)
         self.__uiCache_storeUIElements()
         
     def __uiCB_managePoseRootMethod(self, *args):
@@ -1983,10 +2158,10 @@ class AnimationUI(object):
         '''
         if cmds.checkBox('uicbMetaRig', q=True, v=True):
             self.poseRootMode='MetaRoot'
-            cmds.textFieldButtonGrp('uitfgPoseRootNode', e=True, bl='MetaRoot')
+            cmds.textFieldButtonGrp(self.uitfgPoseRootNode, e=True, bl='MetaRoot')
         else:
             self.poseRootMode='RootNode'
-            cmds.textFieldButtonGrp('uitfgPoseRootNode', e=True, bl='SetRoot')
+            cmds.textFieldButtonGrp(self.uitfgPoseRootNode, e=True, bl='SetRoot')
         self.__uiCache_storeUIElements()
         
     def __uiCB_getPoseInputNodes(self):
@@ -1994,8 +2169,8 @@ class AnimationUI(object):
         Node passed into the __PoseCalls in the UI
         '''
         posenodes=[]
-        setRoot=cmds.textFieldButtonGrp('uitfgPoseRootNode', q=True, text=True)
-        if cmds.checkBox('uicbPoseHierarchy', q=True, v=True):
+        setRoot=cmds.textFieldButtonGrp(self.uitfgPoseRootNode, q=True, text=True)
+        if cmds.checkBox(self.uicbPoseHierarchy, q=True, v=True):
             #hierarchy processing so we MUST pass a root in
             if not setRoot or not cmds.objExists(setRoot):
                 raise StandardError('RootNode not Set for Hierarchy Processing')
@@ -2011,10 +2186,10 @@ class AnimationUI(object):
         '''
         switch the relative mode on for the poseLaoder
         '''
-        self.__uiCache_addCheckbox('uicbPoseRelative')
+        self.__uiCache_addCheckbox(self.uicbPoseRelative)
         state = cmds.checkBox(self.uicbPoseRelative, q=True, v=True)
-        cmds.checkBox('uicbPoseSpace', e=True, en=False)
-        cmds.checkBox('uicbPoseSpace', e=True, en=state)
+        cmds.checkBox(self.uicbPoseSpace, e=True, en=False)
+        cmds.checkBox(self.uicbPoseSpace, e=True, en=state)
         cmds.frameLayout(self.uiflPoseRelativeFrame, e=True, en=state)
      
     def __uiPoseDelete(self, *args):
@@ -2103,7 +2278,7 @@ class AnimationUI(object):
         '''
         Select matching internal nodes
         '''
-        rootNode=cmds.textFieldButtonGrp('uitfgPoseRootNode', q=True, text=True)
+        rootNode=cmds.textFieldButtonGrp(self.uitfgPoseRootNode, q=True, text=True)
         if rootNode and cmds.objExists(rootNode):
             self.__uiPresetFillFilter()  # fill the filterSettings Object
             pose=r9Pose.PoseData(self.filterSettings)
@@ -2120,7 +2295,7 @@ class AnimationUI(object):
         Insert a new SubFolder to the posePath, makes the dir and sets
         it up in the UI to be the current active path
         '''
-        basePath=cmds.textFieldButtonGrp('uitfgPosePath', query=True, text=True)
+        basePath=cmds.textFieldButtonGrp(self.uitfgPosePath, query=True, text=True)
         if not os.path.exists(basePath):
             raise StandardError('Base Pose Path is inValid or not yet set')
         promptstring='New Pose Folder Name'
@@ -2213,14 +2388,17 @@ class AnimationUI(object):
         '''
         Restore the main UI elements from the ini file
         '''
-        self.uiBoot = True
+        self.uiBoot = True  # is the UI being booted
         try:
             log.debug('Loading UI Elements from the config file')
             def __uiCache_LoadCheckboxes():
                 if 'checkboxes' in self.ANIM_UI_OPTVARS['AnimationUI'] and \
                             self.ANIM_UI_OPTVARS['AnimationUI']['checkboxes']:
                     for cb, status in self.ANIM_UI_OPTVARS['AnimationUI']['checkboxes'].items():
-                        cmds.checkBox(cb, e=True, v=r9Core.decodeString(status))
+                        try:
+                            cmds.checkBox(cb, e=True, v=r9Core.decodeString(status))
+                        except:
+                            print 'given checkbox no longer exists : %s' % cb
                 
             AnimationUI = self.ANIM_UI_OPTVARS['AnimationUI']
 
@@ -2249,7 +2427,7 @@ class AnimationUI(object):
                 cmds.textFieldButtonGrp('uitfgPoseSubPath', edit=True, text=AnimationUI['poseSubPath'])
             if 'poseRoot' in AnimationUI and AnimationUI['poseRoot']:
                 if cmds.objExists(AnimationUI['poseRoot']):
-                    cmds.textFieldButtonGrp('uitfgPoseRootNode', e=True, text=AnimationUI['poseRoot'])
+                    cmds.textFieldButtonGrp(self.uitfgPoseRootNode, e=True, text=AnimationUI['poseRoot'])
                     
             __uiCache_LoadCheckboxes()
             
@@ -2262,6 +2440,7 @@ class AnimationUI(object):
             self.__uiCB_switchPosePathMode(self.posePathMode)  # pose Mode - 'local' or 'project'
             self.__uiCB_manageSnapHierachy()  # preCopyAttrs
             self.__uiCB_manageSnapTime()  # preCopyKeys
+            self.__uiCB_manageTimeOffsetState()
             
             
         except StandardError, err:
@@ -2303,6 +2482,23 @@ class AnimationUI(object):
     # MAIN UI FUNCTION CALLS ---
     #------------------------------------------------------------------------------
     
+    def __validate_roots(self):
+        '''
+        new wrapper func to return any mRig system roots from selected
+        when processing in Hierarchy mode only! This now means that all the
+        hierarchy checkbox in the UI will deal with the mRigs as a whole rather
+        than at a system level
+        '''
+        objs=cmds.ls(sl=True)
+        nodes=[]
+        if self.filterSettings.metaRig:
+            for obj in objs:
+                sysroot=r9Meta.getConnectedMetaSystemRoot(obj)
+                if sysroot:
+                    nodes.append(sysroot)
+            return nodes
+        return objs
+            
     def __CopyAttrs(self):
         '''
         Internal UI call for CopyAttrs
@@ -2315,9 +2511,9 @@ class AnimationUI(object):
             self.kws['attributes'] = getChannelBoxSelection()
         if cmds.checkBox(self.uicbCAttrHierarchy, q=True, v=True):
             if self.kws['toMany']:
-                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyAttrs_ToMultiHierarchy(cmds.ls(sl=True, l=True),**self.kws)
+                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyAttrs_ToMultiHierarchy(self.__validate_roots(),**self.kws)
             else:
-                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyAttributes(nodes=None, **self.kws)
+                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyAttributes(nodes=self.__validate_roots(), **self.kws)
         else:
             print self.kws
             AnimFunctions(matchMethod=self.matchMethod).copyAttributes(nodes=None, **self.kws)
@@ -2331,17 +2527,17 @@ class AnimationUI(object):
             return
         self.kws['toMany'] = cmds.checkBox(self.uicbCKeyToMany, q=True, v=True)
         self.kws['pasteKey']=cmds.optionMenu('om_PasteMethod', q=True, v=True)
-        self.kws['mergeLayers']=cmds.checkBox('uicbCKeyAnimLay', q=True, v=True)
-        self.kws['timeOffset']=cmds.floatFieldGrp('uiffgCKeyStep', q=True,v1=True)
+        self.kws['mergeLayers']=cmds.checkBox(self.uicbCKeyAnimLay, q=True, v=True)
+        self.kws['timeOffset']=cmds.floatFieldGrp(self.uiffgCKeyStep, q=True,v1=True)
         if cmds.checkBox(self.uicbCKeyRange, q=True, v=True):
             self.kws['time'] = timeLineRangeGet()
         if cmds.checkBox(self.uicbCKeyChnAttrs, q=True, v=True):
             self.kws['attributes'] = getChannelBoxSelection()
         if cmds.checkBox(self.uicbCKeyHierarchy, q=True, v=True):
             if self.kws['toMany']:
-                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyKeys_ToMultiHierarchy(cmds.ls(sl=True, l=True), **self.kws)
+                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyKeys_ToMultiHierarchy(self.__validate_roots(), **self.kws)
             else:
-                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyKeys(nodes=None, **self.kws)
+                AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).copyKeys(nodes=self.__validate_roots(), **self.kws)
         else:
             AnimFunctions(matchMethod=self.matchMethod).copyKeys(nodes=None, **self.kws)
     
@@ -2355,12 +2551,12 @@ class AnimationUI(object):
         self.kws['preCopyKeys'] = False
         self.kws['preCopyAttrs'] = False
         self.kws['prioritySnapOnly'] = False
-        self.kws['iterations'] = cmds.intFieldGrp('uiifSnapIterations', q=True, v=True)[0]
-        self.kws['step'] = cmds.intFieldGrp('uiifgSnapStep', q=True, v=True)[0]
+        self.kws['iterations'] = cmds.intFieldGrp(self.uiifSnapIterations, q=True, v=True)[0]
+        self.kws['step'] = cmds.intFieldGrp(self.uiifgSnapStep, q=True, v=True)[0]
         self.kws['pasteKey'] = cmds.optionMenu('om_PasteMethod', q=True, v=True)
-        self.kws['mergeLayers'] = cmds.checkBox('uicbCKeyAnimLay', q=True, v=True)
-        self.kws['snapTranslates'] = cmds.checkBox('uicbStanTrans', q=True, v=True)
-        self.kws['snapRotates'] = cmds.checkBox('uicbStanRots', q=True, v=True)
+        self.kws['mergeLayers'] = cmds.checkBox(self.uicbCKeyAnimLay, q=True, v=True)
+        self.kws['snapTranslates'] = cmds.checkBox(self.uicbSnapTrans, q=True, v=True)
+        self.kws['snapRotates'] = cmds.checkBox(self.uicbStapRots, q=True, v=True)
 
         if cmds.checkBox(self.uicbSnapRange, q=True, v=True):
             self.kws['time'] = timeLineRangeGet()
@@ -2370,7 +2566,7 @@ class AnimationUI(object):
             self.kws['preCopyAttrs'] = True
         if cmds.checkBox(self.uicbSnapHierarchy, q=True, v=True):
             self.kws['prioritySnapOnly'] = cmds.checkBox(self.uicbSnapPriorityOnly, q=True, v=True)
-            AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).snapTransform(nodes=None, **self.kws)
+            AnimFunctions(filterSettings=self.filterSettings, matchMethod=self.matchMethod).snapTransform(nodes=self.__validate_roots(), **self.kws)
         else:
             AnimFunctions(matchMethod=self.matchMethod).snapTransform(nodes=None, **self.kws)
     
@@ -2382,7 +2578,7 @@ class AnimationUI(object):
             log.warning('Please Select at least 1 nodes to Process!!')
             return
         time = ()
-        step = cmds.floatFieldGrp('uiffgStabStep', q=True, v=True)[0]
+        step = cmds.floatFieldGrp(self.uiffgStabStep, q=True, v=True)[0]
         if direction=='back':
             step=-step
         if cmds.checkBox(self.uicbStabRange, q=True, v=True):
@@ -2395,18 +2591,21 @@ class AnimationUI(object):
         '''
         Internal UI call for TimeOffset
         '''
-        offset = cmds.floatFieldGrp('uiffgTimeOffset', q=True, v=True)[0]
+        offset = cmds.floatFieldGrp(self.uiffgTimeOffset, q=True, v=True)[0]
+        self.kws['ripple'] = cmds.checkBox(self.uicbTimeOffsetRipple, q=True, v=True)
         if cmds.checkBox(self.uicbTimeOffsetRange, q=True, v=True):
             self.kws['timerange'] = timeLineRangeGet()
-        self.kws['ripple'] = cmds.checkBox(self.uicbTimeOffsetRipple, q=True, v=True)
-            
+        if cmds.checkBox(self.uicbTimeOffsetStartfrm, q=True, en=True):
+                self.kws['startfrm'] = cmds.checkBox(self.uicbTimeOffsetStartfrm, q=True, v=True)  
+                
+        # process scene or fromSelected modes
         if cmds.checkBox(self.uicbTimeOffsetScene, q=True, v=True):
             r9Core.TimeOffset.fullScene(offset, cmds.checkBox(self.uicbTimeOffsetPlayback, q=True, v=True), **self.kws)
         else:
             self.kws['flocking']= cmds.checkBox(self.uicbTimeOffsetFlocking, q=True, v=True)
             self.kws['randomize'] = cmds.checkBox(self.uicbTimeOffsetRandom, q=True, v=True)
             if cmds.checkBox(self.uicbTimeOffsetHierarchy, q=True, v=True):
-                r9Core.TimeOffset.fromSelected(offset, filterSettings=self.filterSettings, **self.kws)
+                r9Core.TimeOffset.fromSelected(offset, filterSettings=self.filterSettings, mRigs=self.filterSettings.metaRig, **self.kws)
             else:
                 r9Core.TimeOffset.fromSelected(offset, **self.kws)
    
@@ -2442,7 +2641,7 @@ class AnimationUI(object):
             except ValueError, error:
                 raise ValueError(error)
 
-        poseHierarchy = cmds.checkBox('uicbPoseHierarchy', q=True, v=True)
+        poseHierarchy = cmds.checkBox(self.uicbPoseHierarchy, q=True, v=True)
 
 #         #Work to hook the poseSave directly to the metaRig.poseCacheStore func directly
 #         if self.filterSettings.metaRig and r9Meta.isMetaNodeInherited(self.__uiCB_getPoseInputNodes(),
@@ -2463,9 +2662,9 @@ class AnimationUI(object):
         Internal UI call for PoseLibrary Load func, note that filterSettings is bound
         but only filled by the main __uiCall call
         '''
-        poseHierarchy = cmds.checkBox('uicbPoseHierarchy', q=True, v=True)
-        poseRelative = cmds.checkBox('uicbPoseRelative', q=True, v=True)
-        maintainSpaces = cmds.checkBox('uicbPoseSpace', q=True, v=True)
+        poseHierarchy = cmds.checkBox(self.uicbPoseHierarchy, q=True, v=True)
+        poseRelative = cmds.checkBox(self.uicbPoseRelative, q=True, v=True)
+        maintainSpaces = cmds.checkBox(self.uicbPoseSpace, q=True, v=True)
         rotRelMethod = cmds.radioCollection(self.uircbPoseRotMethod, q=True, select=True)
         tranRelMethod = cmds.radioCollection(self.uircbPoseTranMethod, q=True, select=True)
         
@@ -2513,7 +2712,7 @@ class AnimationUI(object):
         objs=cmds.ls(sl=True,l=True)
         poseNode = r9Pose.PoseData(self.filterSettings)
         poseNode.filepath = self.getPosePath()
-        poseNode.useFilter = cmds.checkBox('uicbPoseHierarchy', q=True, v=True)
+        poseNode.useFilter = cmds.checkBox(self.uicbPoseHierarchy, q=True, v=True)
         poseNode.matchMethod=self.matchMethod
         poseNode.processPoseFile(self.__uiCB_getPoseInputNodes())
         self._poseBlendUndoChunkOpen=False
@@ -2588,15 +2787,17 @@ class AnimationUI(object):
         '''
         Internal UI call for Mirror Animation / Pose
         '''
-
-        if not cmds.ls(sl=True, l=True):
+        nodes=cmds.ls(sl=True, l=True)
+        if not nodes:
             log.warning('Nothing selected to process from!!')
             return
   
         self.kws['pasteKey'] = cmds.optionMenu('om_PasteMethod', q=True, v=True)
-        hierarchy=cmds.checkBox('uicbMirrorHierarchy', q=True, v=True)
+        hierarchy=cmds.checkBox(self.uicbMirrorHierarchy, q=True, v=True)
         
-        mirror=MirrorHierarchy(nodes=cmds.ls(sl=True, l=True),
+        if hierarchy:
+            nodes=self.__validate_roots()
+        mirror=MirrorHierarchy(nodes=nodes,
                                filterSettings=self.filterSettings,
                                **self.kws)
         
@@ -2829,9 +3030,9 @@ class AnimFunctions(object):
         if not matchMethod:
             matchMethod=self.matchMethod
             
-        log.debug('CopyKey params : \n \
-\tnodes=%s \t\n:time=%s \t\n: pasteKey=%s \t\n: attributes=%s \t\n: filterSettings=%s \t\n: matchMethod=%s \t\n: mergeLayers=%s \t\n: timeOffset=%s' \
-                   % (nodes, time, pasteKey, attributes, filterSettings, matchMethod, mergeLayers, timeOffset))
+#         log.debug('CopyKey params : \n \
+# \tnodes=%s \t\n:time=%s \t\n: pasteKey=%s \t\n: attributes=%s \t\n: filterSettings=%s \t\n: matchMethod=%s \t\n: mergeLayers=%s \t\n: timeOffset=%s' \
+#                    % (nodes, time, pasteKey, attributes, filterSettings, matchMethod, mergeLayers, timeOffset))
                 
         #Build up the node pairs to process
         nodeList = r9Core.processMatchedNodes(nodes,
@@ -2913,8 +3114,8 @@ class AnimFunctions(object):
         if not filterSettings:
             filterSettings=self.settings
             
-        log.debug('CopyAttributes params : nodes=%s\n : attributes=%s\n : filterSettings=%s\n : matchMethod=%s\n'
-                   % (nodes, attributes, filterSettings, matchMethod))
+#         log.debug('CopyAttributes params : nodes=%s\n : attributes=%s\n : filterSettings=%s\n : matchMethod=%s\n'
+#                    % (nodes, attributes, filterSettings, matchMethod))
         
         # build up the node pairs to process
         nodeList = r9Core.processMatchedNodes(nodes,
@@ -2992,7 +3193,7 @@ class AnimFunctions(object):
             all channel Values on all nodes will have their data taken across
         :param iterations: Number of times to process the frame.
         :param matchMethod: arg passed to the match code, sets matchMethod used to match 2 node names
-        :param prioritySnapOnly: if True ONLY snap the nodes in the filterPriority list withing the filterSettings object = Super speed up!!
+        :param prioritySnapOnly: if True ONLY snap the nodes in the filterPriority list within the filterSettings object = Super speed up!!
         :param snapTranslates: only snap the translate data
         :param snapRotates: only snap the rotate data
         
@@ -3324,7 +3525,62 @@ preCopyAttrs=%s : filterSettings=%s : matchMethod=%s : prioritySnapOnly=%s : sna
             except:
                 log.debug(cmds.getAttr('%s.%s' % (node, chan)) * -1)
                 log.debug('failed to inverse %s.%s attr' % (node, chan))
-  
+                
+    @staticmethod
+    def inverseAnimCurves(nodes=None, curves=[], time=(), timePivot=None, mode='object', mRigs=False):
+        '''
+        really basic method to inverse anim curves for a given time, or for the current playback timerange
+        
+        :param nodes: nodes to find animCurves on IF curves were not specified directly
+        :param curves: specific animCurves to act on, else we inspect the nodes given
+        :param time: timerange to inverse, if not given we use the default timeLineRangeGet function as per
+            all other Red9 timerange enabled calls
+        :param timePivot: if given this is the pivot for the scale inverse, else we automatically work
+            this out from the time ranges given
+        :param mode: 'object' or 'keys' are we acting at the object level or at the selected keys level in the graphEditor?
+            'object' is default
+        :param mRigs: if we're in object mode then we modify the nodes to be all child members of linked mRig systems
+        '''
+        if not curves:                    
+            if mode=='object':   
+                if not nodes:
+                    nodes=cmds.ls(sl=True, l=True)
+        
+                # New mrig section so that we can process rigs as entire entities for all the calls
+                if mRigs:
+                    _mrigs=[]
+                    for node in nodes:
+                        mrig=r9Meta.getConnectedMetaSystemRoot(node)
+                        if mrig and not mrig in _mrigs:
+                            _mrigs.append(mrig)
+                    if _mrigs:
+                        nodes=[]
+                        for rig in _mrigs:
+                            nodes.extend(rig.getChildren())
+                
+                if not curves:
+                    curves=r9Core.FilterNode.lsAnimCurves(nodes, safe=True)
+                if not time:
+                    time=timeLineRangeGet()
+            elif mode=='keys':
+                curves = cmds.keyframe(q=True, sl=True, n=True)
+                if curves:
+                    keys = sorted(cmds.keyframe(curves, sl=True, q=True, tc=True))
+                    time = (keys[0], keys[-1])  # note the int conversion in case first key is on a sub-frame
+            
+        if not timePivot:
+            timePivot=(float(time[0]) + float(time[1])) / 2
+            
+        if curves:
+            log.info('AnimCurveInverse : timePivot=%f' % timePivot)
+            if time:
+                cmds.scaleKey(curves, timeScale=-1, timePivot=timePivot, time=time)
+                log.info('AnimCurveInverse : time=(%s,%s)' % (time[0],time[1]))
+            else:
+                cmds.scaleKey(curves, timeScale=-1, timePivot=timePivot)
+        else:
+            log.warning('No Curves found or selected to act upon!')
+
 
 class curveModifierContext(object):
     """
@@ -3334,26 +3590,41 @@ class curveModifierContext(object):
     NOTE that this is optimized to run with a floatSlider and used in both interactive
     Randomizer and FilterCurves
     """
-    def __init__(self, initialUndo=False, undoFuncCache=[], undoDepth=1):
+    def __init__(self, initialUndo=False, undoFuncCache=[], undoDepth=1, processBlanks=False, reselectKeys=True):
         '''
         :param initialUndo: on first process whether undo on entry to the context manager
         :param undoFuncCache: functions to catch in the undo stack
         :param undoDepth: depth of the undo stack to go to
+        :param processBlanks: if undoFuncCache is empty but the last undoName is blank then we consider
+            this a match and run the undo. Why, this is because it's bloody hard to get QT to register
+            calls to the undo stack and that was blocking some of the ProPack functionality
+        :param reselectKeys: if keys were selected on entry we reselect them based on their original timerange
         '''
         self.initialUndo = initialUndo
-        self.undoFuncCache = undoFuncCache
+        self.undoFuncCache = undoFuncCache + ['curveModifierContext']
         self.undoDepth = undoDepth
+        self.processBlanks = processBlanks
+        self.reselectKeys=reselectKeys
     
     def undoCall(self):
         for _ in range(1, self.undoDepth + 1):
-            #log.depth('undoDepth : %s' %  i)
-            if [func for func in self.undoFuncCache if func in cmds.undoInfo(q=True, undoName=True)]:
-                cmds.undo()
-                      
-    def __enter__(self):
+            #print 'undoCall stack : ', cmds.undoInfo(q=True, printQueue=True)
+            if self.undoFuncCache:
+                if [func for func in self.undoFuncCache if func in cmds.undoInfo(q=True, undoName=True)]:
+                    #print func
+                    cmds.undo()
+            else:
+                if self.processBlanks and not cmds.undoInfo(q=True, undoName=True):
+                    #print 'processes blank func : '
+                    cmds.undo()
+             
+    def __enter__(self):        
+        # turn the undo queue on if it's off
+        if not cmds.undoInfo(q=True, state=True):
+            cmds.undoInfo(state=True)
         if self.initialUndo:
             self.undoCall()
-        cmds.undoInfo(openChunk=True)
+        cmds.undoInfo(openChunk=True, chunkName='curveModifierContext')  # enter and create a named chunk
         
         self.range=None
         self.keysSelected=cmds.keyframe(q=True, n=True, sl=True)
@@ -3362,9 +3633,9 @@ class curveModifierContext(object):
             self.range=cmds.keyframe(q=True, sl=True, timeChange=True)
             
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.keysSelected and self.range:
+        if self.reselectKeys and self.keysSelected and self.range:
             cmds.selectKey(self.keysSelected, t=(self.range[0], self.range[-1]))
-        cmds.undoInfo(closeChunk=True)
+        cmds.undoInfo(closeChunk=True, chunkName='curveModifierContext')
         if exc_type:
             log.exception('%s : %s'%(exc_type, exc_value))
         # If this was false, it would re-raise the exception when complete
@@ -3824,7 +4095,7 @@ class FilterCurves(object):
         '''
         straight simplify of curves using a managed cmds.simplfy call
         '''
-        with self.contextManager(self.dragActive,
+        with self.contextManager(initialUndo=self.dragActive,
                                  undoFuncCache=self.undoFuncCache,
                                  undoDepth=self.undoDepth):
             self.dragActive=True  # turn on the undo management
@@ -3854,7 +4125,7 @@ class FilterCurves(object):
             time = ()
         else:
             keys = sorted(cmds.keyframe(curves, sl=True, q=True, tc=True))
-            time = (int(keys[0]), keys[-1])  # note the int convertion in case frist key is on a sub-frame
+            time = (int(keys[0]), keys[-1])  # note the int conversion in case first key is on a sub-frame
         with self.contextManager(True, undoFuncCache=self.undoFuncCache):
             cmds.bakeResults(curves, t=time, sb=step, pok=True)
 
@@ -3897,15 +4168,18 @@ class MirrorHierarchy(object):
         by 180 to get left and right working you can still do so.
     '''
     
-    def __init__(self, nodes=[], filterSettings=None, **kws):
+    def __init__(self, nodes=[], filterSettings=None, suppress=False, **kws):
         '''
         :param nodes: initial nodes to process
         :param filterSettings: filterSettings object to process hierarchies
+        :param suppress: suppress the new warnings and validation call, default=False
         '''
         
         self.nodes = nodes
         if not type(self.nodes) == list:
             self.nodes = [self.nodes]
+            
+        self.suppresss_warnings=suppress
         
         # default Attributes used to define the system
         self.defaultMirrorAxis = ['translateX', 'rotateY', 'rotateZ']
@@ -3918,7 +4192,7 @@ class MirrorHierarchy(object):
         self.kws = kws  # allows us to pass kws into the copyKey and copyAttr call if needed, ie, pasteMethod!
         #print 'kws in Mirror call : ', self.kws
         
-        #cache the function pointers for speed
+        # cache the function pointers for speed
         self.transferCallKeys = AnimFunctions().copyKeys
         self.transferCallAttrs = AnimFunctions().copyAttributes
         
@@ -3934,7 +4208,7 @@ class MirrorHierarchy(object):
         # ensure we use the mirrorSide attr search ensuring all nodes
         # returned are part of the Mirror system
         self.settings.searchAttrs.append(self.mirrorSide)
-    
+                 
     def _validateMirrorEnum(self, side):
         '''
         validate the given side to make sure it's formatted correctly before setting the data
@@ -3950,7 +4224,27 @@ class MirrorHierarchy(object):
             raise ValueError('given mirror side is not a valid key: Left, Right or Centre')
         else:
             return True
-        
+    
+    def _validateConstraints(self, nodes):
+        '''
+        check that none of the nodes about to be mirrored are constrained
+        '''
+        if not self.suppresss_warnings:
+            constrained=nodesDriven(nodes)
+            if constrained:
+                result = cmds.confirmDialog(title='Pre Mirror Validations',
+                                            message='Some nodes about to be mirrored are currently Driven by constraints or pairBlends, are you sure you want to continue?\n\n' \
+                                                    'we recommend baking the nodes down before continuing',
+                                            button=['Continue', 'Cancel'],
+                                            defaultButton='OK',
+                                            cancelButton='Cancel',
+                                            icon='warning',
+                                            dismissString='Cancel')
+                if result == 'Continue':
+                    return True
+                return False
+        return True
+            
     def setMirrorIDs(self, node, side=None, slot=None, axis=None):
         '''
         Add/Set the default attrs required by the MirrorSystems.
@@ -4039,6 +4333,10 @@ class MirrorHierarchy(object):
     def getNodes(self):
         '''
         Get the list of nodes to start processing
+        
+        .. note::
+            this has been modified to respect mRigs first to save you having to select the
+            top level of hierarchy in the mRig itself. Instead we walk the children as expected
         '''
         return r9Core.FilterNode(self.nodes, filterSettings=self.settings).processFilter()
      
@@ -4063,7 +4361,7 @@ class MirrorHierarchy(object):
    
     def getMirrorCompiledID(self, node):
         '''
-        This return the mirror data in a compiled mannor for the poseSaver
+        This return the mirror data in a compiled manor for the poseSaver
         such that mirror data  for a node : Center, ID 10 == Center_10
         '''
         try:
@@ -4275,6 +4573,10 @@ class MirrorHierarchy(object):
         if not self.indexednodes:
             raise IOError('No nodes mirrorIndexed nodes found from given / selected nodes')
         
+        if not self._validateConstraints(self.indexednodes):
+            log.warning('Failed validation call - some nodes may be driven by constraints or pairBlends')
+            return
+        
         if mode == 'Anim':
             inverseCall = AnimFunctions.inverseAnimChannels
             self.mergeLayers=True
@@ -4282,7 +4584,6 @@ class MirrorHierarchy(object):
             inverseCall = AnimFunctions.inverseAttributes
             self.mergeLayers=False
             
-        # with r9General.HIKContext(nodes):
         with AnimationLayerContext(self.indexednodes, mergeLayers=self.mergeLayers, restoreOnExit=False):
             # Switch Pairs on the Left and Right and inverse the channels
             for index, leftData in self.mirrorDict['Left'].items():
@@ -4316,12 +4617,21 @@ class MirrorHierarchy(object):
         ConfigObj.filename = filepath
         ConfigObj.write()
         
-    def loadMirrorSetups(self, filepath, nodes=None, clearCurrent=True, matchMethod='stripPrefix'):  # used to be 'base' for some reason??
-        if not os.path.exists(filepath):
-            raise IOError('invalid filepath given')
-        self.mirrorDict = configobj.ConfigObj(filepath)['mirror']
-        nodesToMap=nodes
+    def loadMirrorSetups(self, filepath=None, nodes=None, clearCurrent=True, matchMethod='stripPrefix'):  # used to be 'base' for some reason??
+        '''
+        Load a Mirror Map to the nodes
         
+        :param filepath: filepath to a mirrorMap, if none given then we assume that the internal mirrorDict is already setup
+        :param nodes: nodes to load, or the root of a system to filter
+        :param clearCurrent: if True then the load will first remove all current mirrormarkers
+        :param matchMethod: method used to match the data to the nodes
+        '''
+        if filepath:
+            if not os.path.exists(filepath):
+                raise IOError('invalid filepath given')
+            self.mirrorDict = configobj.ConfigObj(filepath)['mirror']
+    
+        nodesToMap=nodes
         if not nodesToMap:
             nodesToMap=list(self.nodes)
             nodesToMap.extend(cmds.listRelatives(nodesToMap, ad=True, f=True, type='transform'))
@@ -4474,6 +4784,17 @@ class MirrorSetup(object):
         cmds.radioCollection('mirrorSide', e=True, select='Centre')
         self.__uicb_setupIndex()
 
+    def __get_nodes(self):
+        '''
+        this is a wrap to manage mRig root systems
+        '''
+        nodes=cmds.ls(sl=True,l=True)
+        if nodes:
+            try:
+                return r9Meta.getConnectedMetaSystemRoot(nodes[0],mInstances=r9Meta.MetaRig).masterNode
+            except:
+                return nodes
+
     def __uicb_setupIndex(self, *args):
         '''
         New for MetaRig: If the node selected is part of an MRig when we switch 
@@ -4533,7 +4854,7 @@ class MirrorSetup(object):
             self.__uicb_setDefaults('default')
         
     def __printDebugs(self):
-        self.mirrorClass.nodes = cmds.ls(sl=True)
+        self.mirrorClass.nodes = self.__get_nodes()  # cmds.ls(sl=True)
         self.mirrorClass.printMirrorDict()
     
     def __deleteMarkers(self):
@@ -4633,12 +4954,13 @@ class MirrorSetup(object):
         self.mirrorClass.nodes = cmds.ls(sl=True)
         if cmds.checkBox('mirrorSaveLoadHierarchy', q=True, v=True):
             self.mirrorClass.settings.hierarchy = True
+            self.mirrorClass.nodes = self.__get_nodes()  # cmds.ls(sl=True)
         self.mirrorClass.saveMirrorSetups(filepath=filepath)
 
     def __loadMirrorSetups(self):
         filepath = cmds.fileDialog2(fileFilter="mirrorMap Files (*.mirrorMap *.mirrorMap);;", okc='Load', cap='Load MirrorSetups', fileMode=1)[0]
         if cmds.checkBox('mirrorSaveLoadHierarchy', q=True, v=True):
-            self.mirrorClass.nodes = cmds.ls(sl=True, l=True)
+            self.mirrorClass.nodes = self.__get_nodes()  # cmds.ls(sl=True, l=True)
             self.mirrorClass.loadMirrorSetups(filepath=filepath, clearCurrent=cmds.checkBox('mirrorClearCurrent', q=True, v=True))
         else:
             self.mirrorClass.loadMirrorSetups(filepath=filepath, nodes=cmds.ls(sl=True, l=True), clearCurrent=cmds.checkBox('mirrorClearCurrent', q=True, v=True))
@@ -4770,7 +5092,11 @@ class CameraTracker():
 
 
 class ReconnectAnimData(object):
-    
+    '''
+    This is a method for debugging and re-connecting animation curves when theyve become
+    disconnected from a scene. This happens occasionally when using referencing where the
+    refEdits pointing to the connect calls get broken..
+    '''
     def __init__(self):
         self.win = 'ReconnectAnimData'
         

@@ -61,9 +61,16 @@ def forceToString(text):
     
 def formatPath(path):
     '''
-    take a path and format it to forward slashes with catches for the exceptions
+    take a path and format it to forward slashes with catches for the exceptions so that paths
+    are always Pythonized not OS based
     '''
     return os.path.normpath(path).replace('\\','/').replace('\t','/t').replace('\n','/n').replace('\a', '/a')
+
+def formatPath_join(path, *paths):
+    '''
+    wrapper over os.path.join and formatPath so it's always returned as a valid Python Path
+    '''
+    return formatPath(os.path.join(path, *paths))
     
 def itersubclasses(cls, _seen=None):
     """
@@ -246,6 +253,21 @@ def evalManager_DG(func):
         return res
     return wrapper
 
+def keepSelection(func):
+    '''
+    DECORATOR: to keep scene selection as it was before a function or a method execution
+    '''
+    def wrapper(*args, **kwargs):
+        currentSelection = cmds.ls(sl=True)
+
+        res=func(*args, **kwargs)
+
+        if currentSelection:
+            cmds.select(currentSelection)
+        else:
+            cmds.select(cl=True)
+        return res
+    return wrapper
 
 def evalManagerState(mode='off'):
     '''
@@ -393,10 +415,10 @@ class ProgressBarContext(object):
     >>> 
     >>> #now do your code but increment and check the progress state
     >>> with progressBar:
-    >>>     for i in range(1:1000):
-    >>>        if progressBar.isCanceled():
+    >>>     for i in range(1,1000,1):
+    >>>        if progressBar.isCancelled():
     >>>             print 'process cancelled'
-    >>>             return
+    >>>             break
     >>>         progressBar.updateProgress()
     
     '''
@@ -783,6 +805,12 @@ def getModifier():
     return the modifier key pressed
     '''
     mods = cmds.getModifiers()
+    if (mods & 1) > 0 and (mods & 8) > 0:
+        return 'Shift_Alt'
+    if (mods & 1) > 0 and (mods & 4) > 0:
+        return 'Shift_Ctrl'
+    if (mods & 4) > 0 and (mods & 8) > 0:
+        return 'Ctrl_Alt'
     if (mods & 1) > 0:
         return 'Shift'
     if (mods & 2) > 0:

@@ -140,7 +140,26 @@ def stringReplace(text, replace_dict):
         return replace_dict.get(word, word)
     return rc.sub(translate, text)
 
-
+def removeNameSpace_fromDag(dagpath):
+    '''
+    from a given DagPath remove any namespaces - used in the poseCompare to only compare the native hierarchies
+    
+    such that:
+        "|test:Reference|test:Hips|test:Spine|test:Spine1|test:Spine2|test:Spine3|test:Spine4|test:Neck|test:Neck1|test:Neck2|test:Head"
+    will return:
+        "|Reference|Hips|Spine|Spine1|Spine2|Spine3|Spine4|Neck|Neck1|Neck2|Head"
+    '''
+    clean=nodeNameStrip(dagpath)
+    dirty=dagpath.split('|')[-1]
+    if not clean==dirty:
+        namespaces=dirty.split(clean)[0].split(':')
+        namespaces.reverse()
+        for ns in namespaces:
+            if ns:
+                dagpath=dagpath.replace('%s:' % ns,'')
+        return dagpath
+    return dagpath
+    
 def decodeString(val):
     '''
     From configObj the return is a string, we want to encode
@@ -240,7 +259,7 @@ def filterListByString(input_list, filter_string, matchcase=False):
         else:
             pattern.append(n)
     filterPattern='|'.join(n for n in pattern)
-    log.info('new : %s' % filterPattern)
+    log.debug('new : %s' % filterPattern)
     
     regexFilter=re.compile('('+filterPattern+')')  # convert into a regularExpression
     
@@ -335,6 +354,20 @@ class FilterNode_Settings(object):
         activeFilters.append('transformClamp=%s' % self.transformClamp)
         return '%s(ActiveFilters: %s)' % (self.__class__.__name__, (', ').join(activeFilters))
     
+    def __eq__(self, settingsdata):
+        '''
+        test if a given settings object filters matches this instance
+        '''
+        return all([self.transformClamp==settingsdata.transformClamp,
+                    self.metaRig==settingsdata.metaRig,
+                    self.hierarchy==settingsdata.hierarchy,
+                    self.rigData==settingsdata.rigData,
+                    self.incRoots==settingsdata.incRoots,
+                    self.filterPriority==settingsdata.filterPriority,
+                    self.nodeTypes==settingsdata.nodeTypes,
+                    self.searchAttrs==settingsdata.searchAttrs,
+                    self.searchPattern==settingsdata.searchPattern])
+            
     def filterIsActive(self):
         '''
         the filter is deemed to be active if any of the filterSettings would 
@@ -466,7 +499,7 @@ class FilterNode_UI(object):
         cmds.menuItem(divider=True)
         cmds.menuItem(l=LANGUAGE_MAP._Generic_.contactme, c=lambda *args: (r9Setup.red9ContactInfo()))
         self.MainLayout=cmds.columnLayout(adjustableColumn=True)
-        cmds.frameLayout(label=LANGUAGE_MAP._SearchNodeUI_.complex_node_search, cll=True, borderStyle='etchedOut')
+        cmds.frameLayout(label=LANGUAGE_MAP._SearchNodeUI_.complex_node_search, cll=True)  #, borderStyle='etchedOut')
         cmds.columnLayout(adjustableColumn=True)
         cmds.separator(h=15, style='none')
         
@@ -701,14 +734,18 @@ class FilterNode(object):
             else:
                 mrig=r9Meta.getConnectedMetaSystemRoot(self._rootNodes[0], mInstances=r9Meta.MetaRig)
             if mrig:
+                # PRO PACK ONLY:
                 if mrig.hasAttr('filterSettings') and mrig.filterSettings:
-                    log.info('==============================================================')
-                    log.info('mRig : setting.filterPriority pulled directly from mNodes data')
-                    log.info('==============================================================')
-                    self.settings.filterPriority=mrig.settings.filterPriority
-                    self.settings.rigData['snapPriority']=mrig.settings.rigData['snapPriority']
-                    self.settings.printSettings()
-                    log.info('==============================================================')
+                    try:
+                        #log.info('==============================================================')
+                        log.info('mRig : setting.filterPriority pulled directly from mNodes data')
+                        #log.info('==============================================================')
+                        self.settings.filterPriority=mrig.settings.filterPriority
+                        self.settings.rigData['snapPriority']=mrig.settings.rigData['snapPriority']
+                        #self.settings.printSettings()
+                        #log.info('==============================================================')
+                    except:
+                        log.info('mRig has FilterSettings data but is NOT a Pro_MetaRig - settings aborted')
                 else:
                     log.info('mRig : No specific filter data bound to this rig')
             return mrig
@@ -774,22 +811,19 @@ class FilterNode(object):
                 if cmds.nodeType(node)=='character':
                     self.hierarchy.extend(self.lsCharacterMembers())
                 elif cmds.nodeType(node)=='objectSet':
-                    #print 'objectSets - here'
                     self.hierarchy.extend(self.getObjectSetMembers(node))
                     childSets=cmds.listConnections(node, type='objectSet', s=True, d=False)  # need a walk here??
                     if childSets:
-                        #print 'childSet : ', childSets
                         for childSet in childSets:
                             self.hierarchy.extend(self.getObjectSetMembers(childSet))
                 else:
                     if incRoots:
                         self.hierarchy.append(node)
                     if not transformClamp:
-                        self.hierarchy.extend(cmds.listRelatives(node, ad=True, f=True))
+                        self.hierarchy.extend(cmds.listRelatives(node, ad=True, f=True) or [])
                     else:
                         #Still not sure this is the right place for the transform clamp
-                        self.hierarchy.extend(cmds.listRelatives(node, ad=True, f=True,
-                                                                 type='transform'))
+                        self.hierarchy.extend(cmds.listRelatives(node, ad=True, f=True, type='transform') or [])
             return self.hierarchy
         else:
             raise StandardError('rootNodes not given to class - processing at SceneLevel Only - lsHierarchy is therefore invalid')
@@ -1443,7 +1477,7 @@ class FilterNode(object):
             return self.intersectionData
 
     
-def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=4):  # levels=1)
+def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=4, indexes=False):  # levels=1)
     '''
     quick func to return the blendshape targets found from a give mesh's connected blendshape's
     
@@ -1455,6 +1489,7 @@ def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=4):  # le
     :param asList: return as a straight list of target names or a dict of data
     :param returnAll: if multiple blendshapes are found do we return all, or just the first
     :param levels: same as the 'levels' flag in listHistory as that's ultimately what grabs the blendShape nodes here
+    :param indexes: return the data as a tuple (index, plug(weight[index]), blendtarget )
     '''
     if asList:
         targetData=[]
@@ -1465,16 +1500,19 @@ def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=4):  # le
     if blendshapes:
         for blend in blendshapes:
             weights=cmds.aliasAttr(blend,q=True)
+            print weights
             if weights:
                 data=zip(weights[1::2], weights[0::2])
                 weightKey=lambda x:int(x[0].replace('weight[','').replace(']',''))
                 weightSorted=sorted(data, key=weightKey)
                 if asList:
-                    data=[t for _, t in weightSorted]
+                    data=[t for i, t in weightSorted]
+                    if indexes:
+                        data=[(int(i.replace('weight[','').replace(']','')), i, t) for i, t in weightSorted]
                     if returnAll:
                         targetData.extend(data)
                     else:
-                        #means we only return the first blend in the history
+                        # means we only return the first blend in the history
                         return data
                 else:
                     targetData[blend] = weightSorted
@@ -1514,16 +1552,19 @@ def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
         | * matchMethod="stripPrefix" : Match each element by a relaxed naming convention 
             allowing for prefixes one side such that RigX_Spine == Spine
         | * matchMethod="mirrorIndex" : Match via the nodes MirrorMarker
+        | * matchMethod="metaData" : matc the nodes based on their wiring connections to the MetaData framework
         
     :return: matched pairs of tuples for processing [(a1,b2),[(a2,b2)]
     '''
     infoPrint = ""
     matchedData = []
-    
+    #print 'MatchMethod : ', matchedData
     #take a copy of B as we modify the data here
     hierarchyB=list(nodeListB)
     if matchMethod == 'mirrorIndex':
         getMirrorID=r9Anim.MirrorHierarchy().getMirrorCompiledID
+    if matchMethod == 'metaData':
+        getMetaDict=r9Meta.MetaClass.getNodeConnectionMetaDataMap  # optimisation
     if matchMethod == 'index':
         matchedData = zip(nodeListA,nodeListB)
     elif matchMethod == 'indexReversed':
@@ -1535,12 +1576,14 @@ def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
             strippedA = nodeNameStrip(nodeA)
             if matchMethod == 'mirrorIndex':
                 indexA=getMirrorID(nodeA)
+            if matchMethod == 'metaData':
+                metaDictA=getMetaDict(nodeA)
             for nodeB in hierarchyB:
                 #strip the path off for the compare
                 #strippedA = nodeNameStrip(nodeA)
                 strippedB = nodeNameStrip(nodeB)
                 
-                #BaseMatch is a direct compare ONLY
+                # BaseMatch is a direct compare ONLY
                 if matchMethod == 'base':
                     if strippedA.upper() == strippedB.upper():
                         infoPrint += '\nMatch Method : %s : %s == %s' % \
@@ -1549,7 +1592,7 @@ def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
                         hierarchyB.remove(nodeB)
                         break
                     
-                #Compare allowing for prefixing which is stripped off
+                # Compare allowing for prefixing which is stripped off
                 elif matchMethod == 'stripPrefix':
                     if strippedA.upper().endswith(strippedB.upper()) \
                         or strippedB.upper().endswith(strippedA.upper()):
@@ -1559,9 +1602,17 @@ def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
                         hierarchyB.remove(nodeB)
                         break
                     
-                #Compare using the nodes internal mirrorIndex if found
+                # Compare using the nodes internal mirrorIndex if found
                 elif matchMethod == 'mirrorIndex':
                     if indexA and indexA==getMirrorID(nodeB):
+                        infoPrint += '\nMatch Method : %s : %s == %s' % \
+                                (matchMethod, nodeA.split('|')[-1], nodeB.split('|')[-1])
+                        matchedData.append((nodeA, nodeB))
+                        hierarchyB.remove(nodeB)
+                        break
+                
+                elif matchMethod == 'metaData':
+                    if metaDictA and metaDictA == getMetaDict(nodeB):
                         infoPrint += '\nMatch Method : %s : %s == %s' % \
                                 (matchMethod, nodeA.split('|')[-1], nodeB.split('|')[-1])
                         matchedData.append((nodeA, nodeB))
@@ -1837,6 +1888,7 @@ class LockChannels(object):
                                  c=lambda *args: (r9Setup.red9ContactInfo()), h=22, w=200)
       
             cmds.showWindow(window)
+            cmds.window(self.win, e=True, widthHeight=(260, 410))
             
         def __uicheckboxCallbacksAttr(self, mode, attrs):
             if not isinstance(attrs, list):
@@ -2047,7 +2099,7 @@ class LockChannels(object):
         in the channelBox.
         
         :param nodes: nodes to process
-        :param attrs: set() of attrs
+        :param attrs: set() of attrs, or 'all'
         :param mode: 'lock', 'unlock', 'hide', 'unhide', 'fullkey', 'lockall'
         :param hierarchy: process all child nodes, default is now False
         :param usedDefined: process all UserDefined attributes on all nodes
@@ -2068,7 +2120,7 @@ class LockChannels(object):
             nodes=FilterNode(nodes).lsHierarchy(incRoots=True)
         
         if attrs=='all':
-            attrs=["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz", "v", "nds", "radius"]
+            attrs=["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz", "v", "nds", "radius", "radi"]
             
         if not hasattr(attrs,'__iter__'):
             attrs=set([attrs])
@@ -2104,11 +2156,15 @@ class LockChannels(object):
                     userDefAttrs=set(userDef)
             for attr in (attrs | userDefAttrs):
                 try:
-                    #log.debug('node: %s.%s' % (node,attr))
+                    # log.debug('node: %s.%s' % (node,attr))
+                    '''
+                    If you pass in .tx but you've already locked the compound .translate then
+                    the unlock will fail as it's parent compound is locked... do we fix this?
+                    '''
                     if cmds.attributeQuery(attr, node=node, exists=True):
                         attrString='%s.%s' % (node, attr)
                         if cmds.getAttr(attrString, type=True) in ['double3','float3']:
-                            #why?? Maya fails to set the 'keyable' flag status for compound attrs!
+                            # why?? Maya fails to set the 'keyable' flag status for compound attrs!
                             childAttrs=cmds.listAttr(attrString, multi=True)
                             childAttrs.remove(attr)
                             log.debug('compoundAttr handler for node: %s.%s' % (node,attr))
@@ -2120,7 +2176,7 @@ class LockChannels(object):
                     log.info(error)
                 
 
-def timeOffset_addPadding(pad=None, padfrom=None, scene=False):
+def timeOffset_addPadding(pad=None, padfrom=None, scene=False, mRigs=False):
     '''
     simple wrap of the timeoffset class which will add padding into the
     animation curves on the selected object by shifting keys
@@ -2144,12 +2200,12 @@ def timeOffset_addPadding(pad=None, padfrom=None, scene=False):
         padfrom = cmds.currentTime(q=True)
     if not scene:
         nodes = cmds.ls(sl=True, l=True)
-        TimeOffset.fromSelected(pad, nodes=nodes, timerange=(padfrom, 1000000))
+        TimeOffset.fromSelected(pad, nodes=nodes, timerange=(padfrom, 1000000), mRigs=mRigs)
     else:
         TimeOffset.fullScene(pad, timerange=(padfrom, 1000000))
     # TimeOffset.animCurves(pad, nodes=nodes, time=(padfrom, 1000000))
     
-def timeOffset_collapse(scene=False, timerange=None):
+def timeOffset_collapse(scene=False, timerange=None, mRigs=False):
     '''
     Light wrap over the TimeOffset call to manage collapsing time
     
@@ -2164,7 +2220,7 @@ def timeOffset_collapse(scene=False, timerange=None):
     offset = -(timerange[1] - timerange[0])
     if not scene:
         nodes = cmds.ls(sl=True, l=True)
-        TimeOffset.fromSelected(offset, nodes=nodes, timerange=(timerange[1], 10000000))
+        TimeOffset.fromSelected(offset, nodes=nodes, timerange=(timerange[1], 10000000), mRigs=mRigs)
     else:
         TimeOffset.fullScene(offset, timerange=(timerange[1], 10000000))
     cmds.currentTime(timerange[0], e=True)
@@ -2173,10 +2229,11 @@ def timeOffset_collapseUI():
     '''
     collapse time confirmation UI
     '''
-    def __uicb_run(scene,*args):
+    def __uicb_run(scene, mrigs=False, *args):
         timeOffset_collapse(scene=scene,
                             timerange=(float(cmds.textField('start',q=True,tx=True)),
-                                       float(cmds.textField('end',q=True,tx=True))))
+                                       float(cmds.textField('end',q=True,tx=True))),
+                            mRigs=mrigs)
         
     timeRange = r9Anim.timeLineRangeGet(always=True)
     
@@ -2185,8 +2242,9 @@ def timeOffset_collapseUI():
         cmds.deleteUI(win, window=True)
     cmds.window(win, title=win)
     cmds.columnLayout(adjustableColumn=True)
+    cmds.separator(h=10, style='none')
     cmds.text(label=LANGUAGE_MAP._MainMenus_.collapse_time)
-    cmds.separator(h=10, style='in')
+    cmds.separator(h=15, style='in')
     cmds.rowColumnLayout(nc=4, cw=((1,60),(2,80),(3,60),(4,80)))
     cmds.text(label='Start Frm: ')
     cmds.textField('start', tx=timeRange[0], w=40)
@@ -2197,11 +2255,16 @@ def timeOffset_collapseUI():
     cmds.rowColumnLayout(nc=2, cw=((1,150),(2,150)))
     cmds.button(label=LANGUAGE_MAP._MainMenus_.collapse_full,
                 ann=LANGUAGE_MAP._MainMenus_.collapse_full_ann,
-                command=partial(__uicb_run,True),bgc=r9Setup.red9ButtonBGC('green'))
+                command=partial(__uicb_run,True, False),bgc=r9Setup.red9ButtonBGC('green'))
     cmds.button(label=LANGUAGE_MAP._MainMenus_.collapse_selected,
                 ann=LANGUAGE_MAP._MainMenus_.collapse_selected_ann,
-                command=partial(__uicb_run,False),bgc=r9Setup.red9ButtonBGC('green'))
+                command=partial(__uicb_run, False, False),bgc=r9Setup.red9ButtonBGC('green'))
     cmds.setParent('..')
+    cmds.separator(h=20, style='in')
+    cmds.button(label=LANGUAGE_MAP._MainMenus_.collapse_mrig,
+                ann=LANGUAGE_MAP._MainMenus_.collapse_mrig_ann,
+                command=partial(__uicb_run, False, True),bgc=r9Setup.red9ButtonBGC('green'))
+    
     cmds.separator(h=15, style='none')
     cmds.iconTextButton(style='iconOnly', bgc=(0.7, 0, 0), image1='Rocket9_buttonStrap2.bmp',
                                  c=lambda *args: (r9Setup.red9ContactInfo()), h=22, w=200)
@@ -2217,7 +2280,7 @@ class TimeOffset(object):
     >>> 
     >>> #build a filterSettings object up, in this case we're loading a current one.
     >>> flt=r9Core.FilterNode_Settings()
-    >>> flt.read(os.path.join(r9Setup.red9Presets(),'Crytek_New_Meta.cfg'))
+    >>> flt.read(os.path.join(r9Setup.red9Presets(),'Red9_DevRig.cfg'))
     >>> flt.incRoots=True
     >>> flt.printSettings()
     >>> 
@@ -2225,7 +2288,7 @@ class TimeOffset(object):
 
     '''
     @classmethod
-    def fullScene(cls, offset, timelines=False, timerange=None, ripple=True):
+    def fullScene(cls, offset, timelines=False, timerange=None, ripple=True, startfrm=False):
         '''
         Process the entire scene and time offset all suitable nodes
         
@@ -2233,7 +2296,12 @@ class TimeOffset(object):
         :param timelines: offset the playback timelines
         :param timerange: only offset times within a given timerange
         :param ripple: manage the upper range of data and ripple them with the offset
+        :param startfrm: this turns the offset arg into a new target start frame fopr the animation, 
+            calculating the offset for you such that timerange[0] starts at the offset frm value, only works if timerange is passed in
         '''
+        if timerange and startfrm:       
+            offset = offset - timerange[0]
+            
         log.debug('TimeOffset Scene : offset=%s, timelines=%s' % \
                   (offset, str(timelines)))
         cls.animCurves(offset, timerange=timerange, ripple=ripple)
@@ -2246,16 +2314,20 @@ class TimeOffset(object):
         
     @classmethod
     def fromSelected(cls, offset, nodes=None, filterSettings=None, flocking=False,
-                     randomize=False, timerange=None, ripple=True):
+                     randomize=False, timerange=None, ripple=True, mRigs=False, startfrm=False):
         '''
         Process the current selection list and offset as appropriate.
         
         :param offset: number of frames to offset
         :param nodes: nodes to offset (or root of the filterSettings)
-        :param flocking: wether to sucessively increment nodes during offset
-        :param randomize: whether to add a ramdon factor to each succesive nodes offset
+        :param flocking: whether to successively increment nodes during offset
+        :param randomize: whether to add a random factor to each successive nodes offset
         :param timerange: only offset times within a given timerange
         :param ripple: manage the upper range of data and ripple them with the offset
+        :param mRigs: if True then the nodes used be resolved via mRig.getChildren but for all 
+            mRigs wired to the given nodes
+        :param startfrm: this turns the offset arg into a new target start frame fopr the animation, 
+            calculating the offset for you such that timerange[0] starts at the offset frm value, only works if timerange is passed in
         :param filterSettings: this is a FilterSettings_Node object used to pass all 
             the filter types into the FilterNode code. Internally the following is true:
 
@@ -2265,20 +2337,41 @@ class TimeOffset(object):
             | settings.hierarchy: bool - process all children from the roots
             | settings.incRoots: bool - include the original root nodes in the filter
         '''
+        if timerange and startfrm:       
+            offset = offset - timerange[0]
+            log.info('New Offset calculated based on given Start Frm and timerange : %s' % offset)
+            
         log.debug('TimeOffset from Selected : offset=%s, flocking=%i, randomize=%i, timerange=%s, ripple:%s' % \
                   (offset, flocking, randomize, str(timerange), ripple))
+        
         if not nodes:
-            nodes=cmds.ls(sl=True, l=True)
-
-        if filterSettings:
-            nodes = FilterNode(nodes, filterSettings).processFilter()
-            # selectedNodes.extend(FilterNode(selectedNodes,filterSettings).ProcessFilter())
-            # selectedNodes=sortNumerically(selectedNodes)
-        if nodes:
+            basenodes=cmds.ls(sl=True, l=True)
+        else: 
+            if not hasattr(nodes, '__iter__'):
+                basenodes=[nodes] 
+            else:
+                basenodes=nodes
+                
+        filtered=[]          
+        # New mrig section so that we can process rigs as entire entities for all the calls
+        if mRigs:
+            _mrigs=[]
+            for node in basenodes:
+                mrig=r9Meta.getConnectedMetaSystemRoot(node)
+                if mrig and not mrig in _mrigs:
+                    _mrigs.append(mrig)
+            if _mrigs:
+                for rig in _mrigs:
+                    filtered.extend(rig.getChildren())
+                    
+        elif filterSettings:
+            filtered = FilterNode(basenodes, filterSettings).processFilter()
+            
+        if filtered:
             if flocking or randomize:
                 cachedOffset = 0  # Cached last flocking value
                 increment = 0
-                for node in nodes:
+                for node in filtered:
                     if randomize and not flocking:
                         increment = random.uniform(0, offset)
                     if flocking and not randomize:
@@ -2293,22 +2386,21 @@ class TimeOffset(object):
                                    ripple=ripple)
                     log.debug('animData randon/flock modified offset : %f on node: %s' % (increment, nodeNameStrip(node)))
             else:
-                print nodes
-                cls.animCurves(offset, nodes=nodes,
+                cls.animCurves(offset, nodes=filtered,
                                timerange=timerange,
                                ripple=ripple)
                 cls.sound(offset, mode='Selected',
-                                audioNodes=FilterNode().lsSearchNodeTypes('audio', nodes),
+                                audioNodes=FilterNode().lsSearchNodeTypes('audio', filtered),
                                 timerange=timerange,
                                 ripple=ripple)
                 cls.animClips(offset, mode='Selected',
-                                clips=FilterNode().lsSearchNodeTypes('animClip', nodes),
+                                clips=FilterNode().lsSearchNodeTypes('animClip', filtered),
                                 timerange=timerange,
                                 ripple=ripple)
             log.info('Selected Nodes Offset Successfully')
         else:
             raise StandardError('Nothing selected or returned from the Hierarchy filter to offset')
-
+                
     @staticmethod
     @r9General.Timer
     def animCurves(offset, nodes=None, timerange=None, ripple=True):
@@ -2333,11 +2425,13 @@ class TimeOffset(object):
             if timerange:
                 rippleRange=(timerange[0], 1000000000)
                 if offset>0:
-                    #if moving positive in time, cutchunk is from the upper timerange + offset
+                    # if moving positive in time, cutchunk is from the upper timerange + offset
                     cutTimeBlock=(timerange[1] + 0.1, timerange[1] + offset)
                 else:
-                    #else it's from the lower timerange - offset
-                    cutTimeBlock=(timerange[0] + 0.1, timerange[0] - abs(offset + 1))
+                    # else it's from the lower timerange - offset
+                    #cutTimeBlock=(timerange[0] + 0.1, timerange[0] - abs(offset + 1))
+                    cutTimeBlock=(timerange[0] - 0.1, timerange[0] - abs(offset))  # corrections in the gap being created!!!
+                log.debug('Cutting time range : %s>%s' % (cutTimeBlock[0],cutTimeBlock[1]))
                     
             for curve in safeCurves:
                 try:

@@ -14,11 +14,11 @@ dependencies and menuItems.
 #########  THIS SHOULD NOT REQUIRE ANY OF THE RED9.core modules  ##########
 '''
 
-#from Red9.startup import language_packs
+
 
 
 __author__ = 'Mark Jackson'
-__buildVersionID__ = 2.0
+__buildVersionID__ = 2.5
 installedVersion= False
 
 
@@ -63,12 +63,14 @@ log.setLevel(logging.INFO)
   2015 SP6      .  2015  .  201516  .  2.7      4.8.5  .  2015
   2016          .  2016  .  201600  .  2.7      4.8.6  .  2016    . 2015-04-15
   2016 EXT1 SP6 .  2016  .  201614  .  2.7      4.8.6  .  2016
-  2016 EXT2     .  2016  .  201650  .  2.7      4.8.6  .  2016.5  . 2016-04-15
+  2016 EXT2     .  2016  .  201650  .  2.7      4.8.6  .  2016.5  . 2016-04-15 . 2016 binary incompatible
   2017          .  2017  .  201700  .  2.7      5.6.1  .  2017    . 2016-05-15
   
 ------------------------------------------------------------------------------------------
 '''
 
+# TODO check if there's a current Autodesk Exchange Build so we don't have clashing modules!
+# C:\ProgramData\Autodesk\ApplicationPlugins\Red9StudioPack
 
 #=========================================================================================
 # LANGUAGE MAPPING -----------------------------------------------------------------------
@@ -125,6 +127,21 @@ def mayaVersion():
     else:
         MAYA_INTERNAL_DATA['version'] = mel.eval('getApplicationVersionAsFloat')
         return MAYA_INTERNAL_DATA['version']
+
+def mayaInstallDir():
+    '''
+    This is more for future reference, we read the key from the win registry and return the MAYA_INSTALL_LOCATION
+    
+    https://knowledge.autodesk.com/support/maya/learn-explore/caas/CloudHelp/cloudhelp/2015/ENU/Maya/files/Environment-Variables-File-path-variables-htm.html
+    '''
+    return os.environ['MAYA_LOCATION']
+#     try:
+#         import _winreg    
+#         key = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Autodesk\Maya\{0}\Setup\InstallPath".format(version), 0, _winreg.KEY_READ)
+#         return _winreg.QueryValueEx(key, "MAYA_INSTALL_LOCATION")[0]
+#     except:
+#         raise StandardError('Given Maya key not found in Registry')
+
 
 def mayaVersionRelease():
     '''
@@ -235,6 +252,9 @@ def menuSetup(parent='MayaWindow'):
     try:
         cmds.menuItem('redNineProRootItem',
                       l='PRO : PACK', sm=True, p='redNineMenuItemRoot', tearOff=True,i='red9.jpg')
+                      
+        cmds.menuItem(l=LANGUAGE_MAP._MainMenus_.red9_details+' : ProPack', i='info_30.png',
+                      c='Red9.setup.get_pro_pack()',p='redNineProRootItem')
         
         # Holder Menus for Client code
         if get_client_modules():
@@ -249,32 +269,32 @@ def menuSetup(parent='MayaWindow'):
         cmds.menuItem('redNineAnimItem',
                       l=LANGUAGE_MAP._MainMenus_.animation_toolkit,
                       ann=LANGUAGE_MAP._MainMenus_.animation_toolkit_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='pose_30.png',
                       c="import Red9.core.Red9_AnimationUtils as r9Anim;r9Anim.AnimationUI.show()")
         cmds.menuItem('redNineSnapItem',
                       l=LANGUAGE_MAP._MainMenus_.simple_snap,
                       ann=LANGUAGE_MAP._MainMenus_.simple_snap_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='locationon_30.png',
                       c="import Red9.core.Red9_AnimationUtils as r9Anim;r9Anim.AnimFunctions.snap()")
         cmds.menuItem('redNineSearchItem',
                       l=LANGUAGE_MAP._MainMenus_.searchui,
                       ann=LANGUAGE_MAP._MainMenus_.searchui_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='search_30.png',
                       c="import Red9.core.Red9_CoreUtils as r9Core;r9Core.FilterNode_UI.show()")
         cmds.menuItem('redNineLockChnsItem',
                       l=LANGUAGE_MAP._MainMenus_.lockchannels,
                       ann=LANGUAGE_MAP._MainMenus_.lockchannels_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='lock_30.png',
                       c="import Red9.core.Red9_CoreUtils as r9Core;r9Core.LockChannels.UI.show()")
         cmds.menuItem('redNineMetaUIItem',
                       l=LANGUAGE_MAP._MainMenus_.metanodeui,
                       ann=LANGUAGE_MAP._MainMenus_.metanodeui_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='meta_node_30.png',
                       c="import Red9.core.Red9_Meta as r9Meta;r9Meta.MClassNodeUI.show()")
         cmds.menuItem('redNineReporterUIItem',
                       l=LANGUAGE_MAP._MainMenus_.scene_reviewer,
                       ann=LANGUAGE_MAP._MainMenus_.scene_reviewer_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='hand_with_pen_30.png',
                       c="import Red9.core.Red9_Tools as r9Tools;r9Tools.SceneReviewerUI.show()")
         cmds.menuItem('redNineMoCapItem',
                       l=LANGUAGE_MAP._MainMenus_.mouse_mocap,
@@ -294,9 +314,9 @@ def menuSetup(parent='MayaWindow'):
         cmds.menuItem('redNineMirrorUIItem',
                       l=LANGUAGE_MAP._MainMenus_.mirror_setup,
                       ann=LANGUAGE_MAP._MainMenus_.mirror_setup_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='mirror_30.png',
                       c="import Red9.core.Red9_AnimationUtils as r9Anim;r9Anim.MirrorSetup().show()")
-        cmds.menuItem('redNineCameraTrackItem',
+        cmds.menuItem('redNineCameraTrackItem', i='camera_30.png',
                       l='CameraTracker',sm=True,p='redNineMenuItemRoot')
         cmds.menuItem('redNineCamerTrackFixedItem',
                       l=LANGUAGE_MAP._MainMenus_.camera_tracker_pan,
@@ -323,40 +343,40 @@ def menuSetup(parent='MayaWindow'):
         cmds.menuItem('redNineAnimBndItem',
                       l=LANGUAGE_MAP._MainMenus_.animation_binder,
                       ann=LANGUAGE_MAP._MainMenus_.animation_binder_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='workflow_30.png',
                       c="import Red9.core.AnimationBinder as animBnd;animBnd.AnimBinderUI()._UI()")
         cmds.menuItem(divider=True,p='redNineMenuItemRoot')
         
         cmds.menuItem('redNineHomepageItem',
                       l=LANGUAGE_MAP._MainMenus_.red9_homepage,
                       ann=LANGUAGE_MAP._MainMenus_.red9_homepage_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='domain_30.png',
                       c="Red9.setup.red9_website_home()")
         cmds.menuItem('redNineBlogItem',
                       l=LANGUAGE_MAP._MainMenus_.red9_blog,
                       ann=LANGUAGE_MAP._MainMenus_.red9_blog_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='blogspot_30.png',
                       c="Red9.setup.red9_blog()")
         cmds.menuItem('redNineVimeoItem',
                       l=LANGUAGE_MAP._MainMenus_.red9_vimeo,
                       ann=LANGUAGE_MAP._MainMenus_.red9_vimeo_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='vimeo_30.png',
                       c="Red9.setup.red9_vimeo()")
         cmds.menuItem('redNineFacebookItem',
                       l=LANGUAGE_MAP._MainMenus_.red9_facebook,
                       ann=LANGUAGE_MAP._MainMenus_.red9_facebook_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='facebook_30.png',
                       c="Red9.setup.red9_facebook()")
         cmds.menuItem('redNineAPIDocItem',
                       l=LANGUAGE_MAP._MainMenus_.red9_api_docs,
                       ann=LANGUAGE_MAP._MainMenus_.red9_api_docs_ann,
-                      p='redNineMenuItemRoot', echoCommand=True,
+                      p='redNineMenuItemRoot', echoCommand=True, i='api_30.png',
                       c="Red9.setup.red9_apidocs()")
-        cmds.menuItem(l=LANGUAGE_MAP._MainMenus_.red9_details,
+        cmds.menuItem(l=LANGUAGE_MAP._MainMenus_.red9_details, i='info_30.png',
                       c='Red9.setup.red9ContactInfo()',p='redNineMenuItemRoot')
         cmds.menuItem(divider=True,p='redNineMenuItemRoot')
         
-        cmds.menuItem('redNineDebuggerItem', l=LANGUAGE_MAP._MainMenus_.red9_debugger,sm=True,p='redNineMenuItemRoot')
+        cmds.menuItem('redNineDebuggerItem', l=LANGUAGE_MAP._MainMenus_.red9_debugger,sm=True, i='bug_30.png', p='redNineMenuItemRoot')
         cmds.menuItem('redNineLostAnimItem', p='redNineDebuggerItem',
                       l=LANGUAGE_MAP._MainMenus_.reconnect_anim,
                       ann=LANGUAGE_MAP._MainMenus_.reconnect_anim_ann,
@@ -431,6 +451,9 @@ def menuSetup(parent='MayaWindow'):
         raise StandardError('Unable to parent Red9 Menu to given parent %s' % parent)
 
 def addToMayaMenus():
+    '''
+    Red9 Additions to the Maya Menu's themselves, additions to the timeSlider, fileMenu ETC..
+    '''
     try:
         # fileMenu additions
         if not cmds.menuItem('redNineOpenFolderItem',q=True,ex=True):
@@ -480,6 +503,31 @@ def addToMayaMenus():
             cmds.menuItem(label=LANGUAGE_MAP._MainMenus_.pad_full_scene,
                           ann=LANGUAGE_MAP._MainMenus_.pad_full_scene_ann,
                           c='import Red9.core.Red9_CoreUtils as r9Core;r9Core.timeOffset_addPadding(scene=True)')
+            cmds.menuItem(label=LANGUAGE_MAP._MainMenus_.pad_mrigs,
+                          ann=LANGUAGE_MAP._MainMenus_.pad_mrigs_ann,
+                          c='import Red9.core.Red9_CoreUtils as r9Core;r9Core.timeOffset_addPadding(scene=False,mRigs=True)')
+            
+            cmds.menuItem(subMenu=True, label=LANGUAGE_MAP._MainMenus_.inverse_anim, p=TimeSliderMenu)
+            cmds.menuItem(label=LANGUAGE_MAP._MainMenus_.inverse_selected,
+                          ann=LANGUAGE_MAP._MainMenus_.inverse_selected_ann,
+                          c='import Red9.core.Red9_AnimationUtils as r9Anim;r9Anim.AnimFunctions.inverseAnimCurves(mode="object", mRigs=False)')
+            cmds.menuItem(label=LANGUAGE_MAP._MainMenus_.inverse_mrigs,
+                          ann=LANGUAGE_MAP._MainMenus_.inverse_mrigs_ann,
+                          c='import Red9.core.Red9_AnimationUtils as r9Anim;r9Anim.AnimFunctions.inverseAnimCurves(mode="object", mRigs=True)')
+            if has_pro_pack():
+                cmds.menuItem(divider=True, p=TimeSliderMenu)
+                cmds.menuItem(subMenu=True, label='Red9 PRO: Timecode', p=TimeSliderMenu, i='red9.jpg')
+                cmds.menuItem(label='PRO: Toggle Timecode', i='red9.jpg',
+                          ann='Toggle the timeline to view time in timecode or frame',
+                          c="from Red9.pro_pack import r9pro;r9pro.r9import('r9paudio');import r9paudio;r9paudio.timecode_maya_toggle_timeline()")   
+                cmds.menuItem(divider=True)
+                cmds.menuItem(label='PRO: Set Maya Production Timecode', i='red9.jpg',
+                          ann='set the Internal Maya Production timecode mapping',
+                          c="from Red9.pro_pack import r9pro;r9pro.r9import('r9paudio');import r9paudio;r9paudio.timecode_maya_set_production()")  
+                cmds.menuItem(label='PRO: Reset Maya Production Timecode', i='red9.jpg',
+                          ann='reset the Internal Maya Production timecode mapping',
+                          c="from Red9.pro_pack import r9pro;r9pro.r9import('r9paudio');import r9paudio;r9paudio.timecode_maya_set_production(reset=True)")     
+      
         else:
             log.debug('Red9 Timeslider menus already built')
     except:
@@ -513,16 +561,18 @@ def addAudioMenu(parent=None, rootMenu='redNineTraxRoot'):
         else:
             raise StandardError('given parent for Red9 Sound Menu is invalid %s' % parent)
     
-#    if not parent:
-#        print 'new r9Sound Menu added'
-#        cmds.menu(rootMenu, l=LANGUAGE_MAP._MainMenus_.sound_red9_sound, tearOff=True, allowOptionBoxes=True)
-#    else:
-#        print 'new r9Sound Menu added to parent menu', parent
-#        cmds.menu(rootMenu, l=LANGUAGE_MAP._MainMenus_.sound_red9_sound, tearOff=True, allowOptionBoxes=True, parent=parent)
-        
+
     cmds.menuItem(l=LANGUAGE_MAP._MainMenus_.sound_offset_manager, p=rootMenu,
                   ann=LANGUAGE_MAP._MainMenus_.sound_offset_manager_ann,
                   c="import Red9.core.Red9_Audio as r9Audio;r9Audio.AudioToolsWrap().show()")
+    if has_pro_pack():
+        cmds.menuItem(l='PRO: Timecode Manager', p=rootMenu,
+                  ann='Pro Time and Audio offset management tools',
+                  c="from Red9.pro_pack import Pro_MenuStubs;Pro_MenuStubs('r9timecode_manager')")  
+        cmds.menuItem(l='PRO: Audio Manager', p=rootMenu,
+                  ann='Pro Audio Manager for linking audio to mRig export nodes - data links saved in the r9Anim hooks',
+                  c="from Red9.pro_pack import Pro_MenuStubs;Pro_MenuStubs('r9audio_manager')")         
+
     cmds.menuItem(d=True)
     cmds.menuItem(l=LANGUAGE_MAP._MainMenus_.sound_activate_selected_audio, p=rootMenu,
                   ann=LANGUAGE_MAP._MainMenus_.sound_activate_selected_audio_ann,
@@ -581,28 +631,66 @@ def red9ButtonBGC(colour, qt=False):
     elif colour==3 or colour=='red':
         rgb=[1,0.3,0.3]
     elif colour==4 or colour=='white':
-        rgb=[0.75,0.8,0.8]
+        rgb=[0.75,0.75,0.8]
     elif colour==5 or colour=='dark':
         rgb=[0.15,0.25,0.25]
+    elif colour==6 or colour=='yellow':
+        rgb=[0.98,0.7,0.0]
     if qt:
         return [rgb[0]*255,rgb[1]*255,rgb[2]*255]
     else:
         return rgb
    
-def red9ContactInfo(*args):
-    import Red9.core.Red9_General as r9General  # lazy load
-    result=cmds.confirmDialog(title='Red9_StudioPack : build %f' % red9_getVersion(),
-                       message=("Author: Mark Jackson\r\r"+
-                                "Technical Animation Director\r\r"+
-                                "Contact me at info@red9Consultancy.com for more information\r\r"+
-                                "thanks for trying the toolset. If you have any\r"+
-                                "suggestions or bugs please let me know!"),
-                       button=['Red9Consultancy.com','ChangeLog','Close'],messageAlign='center')
-    if result == 'ChangeLog':
-        r9General.os_OpenFile(os.path.join(red9ModulePath(),'changeLog.txt'))
-    if result =='Red9Consultancy.com':
-        r9General.os_OpenFile('http://red9consultancy.com/')
+# def red9ContactInfo(*args):
+#     '''
+#     add icon link for : https://icons8.com
+#     '''
+#     import Red9.core.Red9_General as r9General  # lazy load
+#     result=cmds.confirmDialog(title='Red9_StudioPack : build %f' % red9_getVersion(),
+#                        message=("Author: Mark Jackson\r\r"+
+#                                 "Technical Animation Director\r\r"+
+#                                 "Contact me at info@red9Consultancy.com for more information\r\r"+
+#                                 "thanks for trying the toolset. If you have any\r"+
+#                                 "suggestions or bugs please let me know!"),
+#                        button=['Red9Consultancy.com','ChangeLog','Close'],messageAlign='center')
+#     if result == 'ChangeLog':
+#         r9General.os_OpenFile(os.path.join(red9ModulePath(),'changeLog.txt'))
+#     if result =='Red9Consultancy.com':
+#         r9General.os_OpenFile('http://red9consultancy.com/')
         
+        
+
+def red9ContactInfo(*args):
+    '''
+    launch the stand-in UI for ProPack
+    '''
+    redSPWin='Red9StudioPack'
+    if cmds.window(redSPWin,exists=True):
+        cmds.deleteUI(redSPWin, window=True)
+    redProWin = cmds.window(redSPWin, title='Red9_StudioPack : build %s' % red9_getVersion(),s=False)
+    cmds.columnLayout()
+    cmds.rowColumnLayout(nc=2,cw=(1,50))
+    cmds.separator(style='none')
+    cmds.image( image='Red9_StudioPack_logo.png' )
+    cmds.setParent('..')
+    cmds.rowColumnLayout(nc=1,cw=(1,350))
+    cmds.text( fn='boldLabelFont',l="Red9 StudioPack\nAuthor: Mark Jackson\n\n"+\
+                                 "Red9 Consultancy\n"+\
+                                 "Contact: info@red9Consultancy.com\n\n"+\
+                                 "thanks for trying the toolset. If you have any\n"+\
+                                 "suggestions or bugs please let us know!\n\n")
+    cmds.button(label='Visit us for more Information',h=40,c="import Red9.core.Red9_General as r9General;r9General.os_OpenFile('http://red9consultancy.com/')")
+    cmds.separator(style='none',h=5)
+    cmds.button(label='GitHub project',h=40,c="import Red9.core.Red9_General as r9General;r9General.os_OpenFile('https://github.com/markj3d/Red9_StudioPack')")
+    cmds.separator(style='none',h=15) 
+    cmds.text(l="with thanks to:")
+    cmds.text(l="icon libs: https://icons8.com")
+    cmds.text(l="pydub libs: https://github.com/jiaaro/pydub")
+    cmds.showWindow(redSPWin)
+    cmds.window(redSPWin, e=True,widthHeight=(350, 535))
+        
+        
+           
 def red9Presets():
     '''
     get the default presets dir for all filterSettings.cfg files
@@ -694,25 +782,42 @@ def red9_getVersion():
 def red9_getAuthor():
     return __author__
 
-def get_pro_pack(*args):
-    try:
-        #new pro_pack build calls
-        import Red9.pro_pack.r9pro as r9pro
-        r9pro.r9import('r9wtools')
-        import r9wtools
-        r9wtools.MailRegistration().show()
-    except:
-        #legacy
-        import Red9.core.Red9_General as r9General  # lazy load
-        result=cmds.confirmDialog(title='Red9_StudioPack : build %f' % red9_getVersion(),
-                            message=("Red9_ProPack Not Installed!\r\r"+
-                                     "Contact info@red9consultancy.com for more information"),
-                            button=['Red9Consultancy.com','Get_Pro','Close'],messageAlign='center')
-        if result == 'Get_Pro':
-            log.warning('Red9 ProPack systems not yet available - watch this space!')
-        if result =='Red9Consultancy.com':
-            r9General.os_OpenFile('http://red9consultancy.com/')
+# def get_pro_pack(*args):
+#     try:
+#         #new pro_pack build calls
+#         import Red9.pro_pack.r9pro as r9pro
+#         r9pro.r9import('r9wtools')
+#         import r9wtools
+#         r9wtools.MailRegistration().show()
+#     except:
+#         #legacy
+#         import Red9.core.Red9_General as r9General  # lazy load
+#         result=cmds.confirmDialog(title='Red9_StudioPack : build %f' % red9_getVersion(),
+#                             message=("Red9_ProPack Not Installed!\r\r"+
+#                                      "Contact info@red9consultancy.com for more information"),
+#                             button=['Red9Consultancy.com','Get_Pro','Close'],messageAlign='center')
+#         if result == 'Get_Pro':
+#             log.warning('Red9 ProPack systems not yet available - watch this space!')
+#         if result =='Red9Consultancy.com':
+#             r9General.os_OpenFile('http://red9consultancy.com/')
 
+def get_pro_pack(*args):
+    '''
+    launch the stand-in UI for ProPack
+    '''
+    redProWin='Red9ProPack'
+    if cmds.window(redProWin,exists=True):
+        cmds.deleteUI(redProWin, window=True)
+    redProWin = cmds.window(redProWin, title="Red9 ProPack",s=False)
+    cmds.columnLayout()
+    cmds.paneLayout()
+    cmds.image( image='Red9_ProPack_logo.png' )
+    cmds.setParent('..')
+    cmds.rowColumnLayout(nc=1,cw=(1,250))
+    cmds.text(l="Red9 ProPack : Not yet Installed!\n", fn='boldLabelFont')
+    cmds.button(label='Get Me ProPack!',h=40,c="import Red9.core.Red9_General as r9General;r9General.os_OpenFile('http://red9consultancy.com/')")
+    cmds.showWindow( redProWin )
+    cmds.window(redProWin,e=True,widthHeight=(250, 350))
 
 # -----------------------------------------------------------------------------------------
 # BOOT FUNCTIONS ---
@@ -918,7 +1023,26 @@ class pro_pack_missing_stub(object):
     '''
     def __init__(self):
         raise ProPack_UIError()
-    
+
+def get_pro_pack_user_dir():
+    '''
+    :return: string with Red9pro user directory path, this directory is mainly use to store Red9 pro pack user files
+    '''
+    path = os.path.join(os.path.dirname(mayaPrefs()), 'R9_PRO')
+    if not os.path.exists(path):
+        os.mkdir(path)
+    if os.path.exists(path):
+        return os.path.normpath(path).replace('\\', '/')
+
+def get_pro_pack_prefs():
+    '''
+    :return: string with Red9pro prefs directory path, this directory is mainly use to storing user setting files
+    '''
+    path = os.path.join(get_pro_pack_user_dir(), 'prefs')
+    if not os.path.exists(path):
+        os.mkdir(path)
+    if os.path.exists(path):
+        return os.path.normpath(path).replace('\\', '/')
 
 
 # -----------------------------------------------------------------------------------------
@@ -993,25 +1117,34 @@ def boot_client_projects():
         result=cmds.confirmDialog(title='ProjectPicker',
                             message=("Multiple Projects Found!\r\r"+
                                      "Which Project would you like to boot?"),
-                            button=options, messageAlign='center')
+                            button=options, messageAlign='center',icon='question',
+                            dismissString='Cancel')
         if result == 'All':
             clientsToBoot=clients
-        else:
+        elif not result == 'Cancel':
             clientsToBoot.append(result)
     else:
         clientsToBoot=clients
         
     # boot the project / projects
     for client in clientsToBoot:
-        log.info('Booting Client Module : %s' % client)
+
+        # manage default project folders
+        if os.path.exists(os.path.join(client_core_path(),client,'icons')):
+            addIconsPath(os.path.join(client_core_path(),client,'icons'))
+            
         cmds.evalDeferred("import Red9_ClientCore.%s" % client, lp=True)  # Unresolved Import
+
         CLIENTS_BOOTED.append(client)
         
     # remove unused menuItems - added previously so that the menu grouping is clean
     for client in clients:
         if not client in clientsToBoot:
-            cmds.deleteUI('redNineClient%sItem' % client)
-            log.debug('Unused Client Menu Removed: %s' % client)
+            try:
+                cmds.deleteUI('redNineClient%sItem' % client)
+                log.debug('Unused Client Menu Removed: %s' % client)
+            except:
+                pass
                 
 def __reload_clients__():
     '''
@@ -1034,9 +1167,9 @@ def __reload_clients__():
 def start(Menu=True, MayaUIHooks=True, MayaOverloads=True, parentMenu='MayaWindow'):
     '''
     Main entry point for the StudioPack
-    @param Menu: Add the Red9 Menu to the Maya Main Menus
-    @param MayUIHooks: Add the Red9 hooks to Maya Native UI's
-    @param MayaOverloads: run the Maya native script hacks for Red9 - integrates into native Maya ui's
+    :param Menu: Add the Red9 Menu to the Maya Main Menus
+    :param MayUIHooks: Add the Red9 hooks to Maya Native UI's
+    :param MayaOverloads: run the Maya native script hacks for Red9 - integrates into native Maya ui's
     '''
     log.info('Red9 StudioPack v%s : author: %s' % (red9_getVersion(), red9_getAuthor()))
     log.info('Red9 StudioPack Setup Calls :: Booting from >> %s' % red9ModulePath())
@@ -1055,15 +1188,17 @@ def start(Menu=True, MayaUIHooks=True, MayaOverloads=True, parentMenu='MayaWindo
 #            return
 #    else:
 #        print 'Red9 : no version currently loaded'
-            
+    
+    # StudioPack boot loader
+    # ====================== 
 
-    #Ensure the Plug-in and Icon paths are up
+    # ensure the Plug-in and Icon paths are up
     addPluginPath()
     addIconsPath()
-    #Need to add a Mel Folder to the scripts path
+    # need to add a Mel Folder to the scripts path
     addScriptsPath(os.path.join(red9ModulePath(),'core'))
     
-    #Add the Packages folder
+    # add the Packages folder
     addPythonPackages()
     
     if not cmds.about(batch=True):
@@ -1074,7 +1209,7 @@ def start(Menu=True, MayaUIHooks=True, MayaOverloads=True, parentMenu='MayaWindo
                 log.debug('Red9 main menu Build Failed!')
                 
         if MayaUIHooks:
-            #Source Maya Hacked Mel files
+            # source Maya Hacked Mel files
             hacked=red9MayaNativePath()
             if hacked and MayaOverloads:
                 addScriptsPath(os.path.join(red9ModulePath(),'startup','maya_native'))
@@ -1090,21 +1225,30 @@ def start(Menu=True, MayaUIHooks=True, MayaOverloads=True, parentMenu='MayaWindo
 
     log.info('Red9 StudioPack Complete!')
     
-    # Rearrangement of the Boot core systems to better structure the boot sequence
+    # re-arrangement of the Boot core systems to better structure the boot sequence
     
-    # Boot main Red9.core
+    # boot main Red9.core
     cmds.evalDeferred("import Red9.core", lp=True)
 
-    # Boot the Pro_Pack
+    # ProPack boot loader
+    # =====================
     if has_pro_pack():
         cmds.evalDeferred("import Red9.pro_pack", lp=True)  # Unresolved Import
-    # Boot the Red9_Internal systems
+        
+    # Red9_Internal systems
+    # =====================
     if has_internal_systems():
         cmds.evalDeferred("import Red9_Internals", lp=True)  # Unresolved Import
-    # Boot Client Codebases
+        
+    # Client Codebases boot
+    # =====================
     if has_client_modules():
         boot_client_projects()
-        #cmds.evalDeferred("import Red9_ClientCore", lp=True)  # Unresolved Import
+        
+    # finish ProPack dependancies
+    # ===========================
+    
+
            
            
 def reload_Red9(*args):
@@ -1118,14 +1262,20 @@ def reload_Red9(*args):
     Red9.core._reload()
     
     if has_pro_pack():
+        print '\nReloading ProPack Systems (INTERNAL USE)'
+        print '='*40
         import Red9.pro_pack.core
         Red9.pro_pack.core._reload()
         
     if has_internal_systems():
+        print '\nReloading Internal Codebase'
+        print '='*40
         import Red9_Internals
         Red9_Internals._reload()
 
     if has_client_modules():
+        print '\nReloading Client Codebase'
+        print '='*40
         __reload_clients__()
 
 

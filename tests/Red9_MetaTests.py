@@ -112,10 +112,10 @@ class Test_MetaCache():
         '''
         cmds.polyCube(name='cube1')
         n1 = r9Meta.MetaClass('|cube1')
-        UUID=cmds.ls(n1.mNode, uuid=True)[0]
         r9Meta.registerMClassNodeCache(n1)
         # from 2016 the UUID is the key for all nodes in the Cache
         if r9Setup.mayaVersion()>=2016:
+            UUID=cmds.ls(n1.mNode, uuid=True)[0]
             assert r9Meta.RED9_META_NODECACHE[UUID]==n1
         else:
             assert r9Meta.RED9_META_NODECACHE['|cube1']==n1
@@ -127,11 +127,12 @@ class Test_MetaCache():
         #the MOBject to ensure that things are still correct in the pull
         cmds.polyCube(name='cube1')
         n2 = r9Meta.MetaClass('|cube1')
-        UUID=cmds.ls(n2.mNode, uuid=True)[0]
+        
         assert n2.mNode=='|cube1'
         assert not n2.mNode=='renamedCube1'
         r9Meta.registerMClassNodeCache(n2)
         if r9Setup.mayaVersion()>=2016:
+            UUID=cmds.ls(n2.mNode, uuid=True)[0]
             assert r9Meta.RED9_META_NODECACHE[UUID]==n2
         else:
             assert r9Meta.RED9_META_NODECACHE['|cube1']==n2
@@ -199,7 +200,7 @@ class Test_MetaClass():
         
     
     def test_isValid(self):
-        assert self.MClass.isValid()  # strange one, isValid fails if the mNode has no connections.... is this a good decision?
+        assert not self.MClass.isValid()  # strange one, isValid fails if the mNode has no connections.... is this a good decision?
         cube1=cmds.ls(cmds.polyCube()[0],l=True)[0]
         newMeta=r9Meta.MetaClass(cube1)
         assert newMeta.isValid()
@@ -549,6 +550,14 @@ class Test_MetaClass():
             assert True
         assert cmds.addAttr('%s.max' % self.MClass.mNode, q=True,max=True) == 10
         
+        # check that adding attrs back onto an mNode through cmds still gets picked up
+        mObj1 = r9Meta.MetaClass(name = 'testr9')
+        cmds.addAttr(mObj1.mNode, ln = 'stringTest', dt = 'string')
+        cmds.setAttr('%s.stringTest' % mObj1.mNode, 'maya_added_attr',type='string')
+        assert cmds.getAttr('%s.stringTest' % mObj1.mNode) == 'maya_added_attr'
+        assert mObj1.stringTest == 'maya_added_attr'
+        
+        
         
     def test_attributeHandling(self):
         '''
@@ -750,11 +759,10 @@ class Test_MetaClass():
         assert cmds.attributeQuery('msgSingleTest',node=node.mNode, multi=True)==False
         
         #NOTE : cmds returns shortName, but all MetaClass attrs are always longName
-        print cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)
-        assert cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgMultiTest',
-                                                                 'pCube2.MetaClass_Test',
-                                                                 'MetaClass_Test.msgMultiTest',
-                                                                 'pCube1.MetaClass_Test']
+        assert cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgMultiTest[0]',
+                                                                 'pCube1.MetaClass_Test[0]',
+                                                                 'MetaClass_Test.msgMultiTest[1]',
+                                                                 'pCube2.MetaClass_Test[0]']
         assert cmds.listConnections('%s.msgSingleTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgSingleTest',
                                                                                      'pCube3.MetaClass_Test']
    
@@ -765,10 +773,11 @@ class Test_MetaClass():
         node.msgMultiTest=[cube5,cube6]
         assert sorted(node.msgMultiTest)==[cube5,cube6]
         assert not cmds.attributeQuery('MetaClass_Test',node=cube1, exists=True)  # disconnect should delete the old connection attr
-        assert cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgMultiTest',
-                                                                 'pCube6.MetaClass_Test',
-                                                                 'MetaClass_Test.msgMultiTest',
-                                                                 'pCube5.MetaClass_Test']
+        print cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)
+        assert cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgMultiTest[0]',
+                                                                 'pCube5.MetaClass_Test[0]',
+                                                                 'MetaClass_Test.msgMultiTest[1]',
+                                                                 'pCube6.MetaClass_Test[0]']
         node.msgMultiTest=[cube1,cube2,cube4,cube6]
         assert sorted(node.msgMultiTest)==[cube1,cube2,cube4,cube6]
         assert sorted(cmds.listConnections('%s.msgMultiTest' % node.mNode))==['pCube1','pCube2','pCube4','pCube6']
@@ -1133,7 +1142,45 @@ class Test_MetaRig():
                         
     def test_getNodeConnections(self):
         assert self.mRig.L_Leg_System.getNodeConnections('|World_Ctrl|L_Foot_grp|L_Foot_Ctrl') == ['CTRL_L_Foot']
+
+    def test_getChildMetaNodes(self):
+        # test that the new flags in the get calls are running
+        assert sorted([n.mNode for n in self.mRig.getChildMetaNodes(walk=False, mAttrs=['systemType=Arm'], stepover=False)]) == ['L_ArmSystem',
+                                                                                                                                 'R_ArmSystem'] 
+        # stepover non matched test
+        assert self.mRig.getChildMetaNodes(walk=True, mAttrs=['systemType=Fingers'], stepover=False) == []
+        assert sorted([n.mNode for n in self.mRig.getChildMetaNodes(walk=True, mAttrs=['systemType=Fingers'], stepover=True)]) == ['L_Fingers_System',
+                                                                                                                                   'R_Fingers_System']
+    
+        assert sorted([n.mNode for n in self.mRig.getChildMetaNodes(walk=True, mTypes=['MetaRigSupport'], stepover=True)])==['L_ArmSupport',
+                                                                                                                             'L_LegSupport',
+                                                                                                                             'R_ArmSupport',
+                                                                                                                             'R_LegSupport',
+                                                                                                                             'SpineSupport']
         
+        assert sorted([n.mNode for n in self.mRig.getChildMetaNodes(walk=True, mInstances=['MetaRig'], stepover=True)])==[  'L_ArmSystem',
+                                                                                                                            'L_Fingers_System',
+                                                                                                                            'L_LegSystem',
+                                                                                                                            'R_ArmSystem',
+                                                                                                                            'R_Fingers_System',
+                                                                                                                            'R_LegSystem',
+                                                                                                                            'SpineSystem']
+        
+        assert sorted([n.mNode for n in self.mRig.getChildMetaNodes(walk=True, mInstances=['MetaClass'], stepover=True)])==['L_ArmSupport',
+                                                                                                                            'L_ArmSystem',
+                                                                                                                            'L_Fingers_System',
+                                                                                                                            'L_LegSupport',
+                                                                                                                            'L_LegSystem',
+                                                                                                                            'R_ArmSupport',
+                                                                                                                            'R_ArmSystem',
+                                                                                                                            'R_Fingers_System',
+                                                                                                                            'R_LegSupport',
+                                                                                                                            'R_LegSystem',
+                                                                                                                            'SpineSupport',
+                                                                                                                            'SpineSystem']  
+        assert self.mRig.getChildMetaNodes(walk=True, mInstances=['MetaRigSupport'], stepover=False)==[]   
+        assert [n.mNode for n in self.mRig.L_ArmSystem.getChildMetaNodes(walk=True, mInstances=['MetaRigSupport'], stepover=False)]==['L_ArmSupport']
+          
 #    def test_getChildren_mAttrs(self):
 #        #TODO: Fill Test
 #        pass
@@ -1213,7 +1260,8 @@ class Test_SpeedTesting():
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill=False) for p in cubes]
         print 'SPEED: Standard Wrapped Nodes : autofill=False: %s' % str(time.clock() - now)
-        print 'Timer should be around 2.28 secs on the Beast'  #3.28
+        print 'Timer 05/01/17 should be around 2.48 secs on the Beast'
+        print 'Timer should be around 2.28 secs on the Beast'  
         
         # verify against pymel, I know we're still a lot slower
         now = time.clock()
@@ -1225,7 +1273,8 @@ class Test_SpeedTesting():
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill='all') for p in cubes]
         print 'SPEED: Standard Wrapped Nodes : autofill=all : %s' % str(time.clock() - now)
-        print 'Timer should be around 9.04 secs on the Beast'  #10.48
+        print 'Timer 05/01/17 should be around 5.27 secs on the Beast'
+        print 'Timer should be around 9.04 secs on the Beast'  
 
         assert False
         
@@ -1237,12 +1286,14 @@ class Test_SpeedTesting():
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill='all') for p in nodes]
         print 'SPEED: Meta Nodes : autofill=all : %s' % str(time.clock() - now)
+        print 'Timer 05/01/17 should be around 6.25 secs on the Beast'
         print 'Timer should be around 8.5 secs on the Beast'
         print '\n'
         
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill='all') for p in nodes]
         print 'SPEED: Meta Nodes from Cache :  %s' % str(time.clock() - now)
+        print 'Timer 05/01/17 should be around 2.93 secs on the Beast'
         print 'Timer should be around 3.25 secs on the Beast'
         print '\n'
         
@@ -1250,6 +1301,7 @@ class Test_SpeedTesting():
         
         c = [r9Meta.MetaClass(p, autofill=False) for p in nodes]
         print 'SPEED: Meta Nodes : autofill=False : %s' % str(time.clock() - now)
+        print 'Timer 05/01/17 should be around 7.39 secs on the Beast'
         print 'Timer should be around 8.5 secs on the Beast'
         assert False
         
@@ -1349,13 +1401,8 @@ class Test_MetaNetworks():
         assert not r9Meta.getConnectedMetaSystemRoot('R_Fingers_System', ignoreTypes='MetaRig')
         
         assert r9Meta.getConnectedMetaSystemRoot('R_Toes_System').mClass=='MetaClass'
-        assert r9Meta.getConnectedMetaSystemRoot('R_Toes_System', ignoreTypes=['MetaClass']).mClass=='MetaRig'
-                
-    def test_getChildMetaNodes_mAttrs(self):
-        #TODO: this code needs fixing and then testing!!!!!!
-        #self.mRig.getChildMetaNodes(walk=True,mAttrs='ddddddddddddd')
-        pass
-    
+        assert r9Meta.getConnectedMetaSystemRoot('R_Toes_System', ignoreTypes=['MetaClass']).mClass=='MetaRig'       
+          
     def test_getMetaNodes_mAttrs(self):
         mNodes=r9Meta.getMetaNodes(mAttrs='mirrorSide=1')
         assert sorted([node.mNodeID for node in mNodes])==['L_Arm_System',

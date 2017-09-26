@@ -83,10 +83,10 @@ time the tools process a hierarchy it&#8217;s these classes that deal with it.</
 <tr class="row-even"><td><a class="reference internal" href="#Red9.core.Red9_CoreUtils.getBlendTargetsFromMesh" title="Red9.core.Red9_CoreUtils.getBlendTargetsFromMesh"><code class="xref py py-obj docutils literal"><span class="pre">getBlendTargetsFromMesh</span></code></a>(node[,&nbsp;asList,&nbsp;...])</td>
 <td>quick func to return the blendshape targets found from a give mesh&#8217;s connected blendshape&#8217;s</td>
 </tr>
-<tr class="row-odd"><td><a class="reference internal" href="#Red9.core.Red9_CoreUtils.timeOffset_addPadding" title="Red9.core.Red9_CoreUtils.timeOffset_addPadding"><code class="xref py py-obj docutils literal"><span class="pre">timeOffset_addPadding</span></code></a>([pad,&nbsp;padfrom,&nbsp;scene])</td>
+<tr class="row-odd"><td><a class="reference internal" href="#Red9.core.Red9_CoreUtils.timeOffset_addPadding" title="Red9.core.Red9_CoreUtils.timeOffset_addPadding"><code class="xref py py-obj docutils literal"><span class="pre">timeOffset_addPadding</span></code></a>([pad,&nbsp;padfrom,&nbsp;scene,&nbsp;...])</td>
 <td>simple wrap of the timeoffset class which will add padding into the</td>
 </tr>
-<tr class="row-even"><td><a class="reference internal" href="#Red9.core.Red9_CoreUtils.timeOffset_collapse" title="Red9.core.Red9_CoreUtils.timeOffset_collapse"><code class="xref py py-obj docutils literal"><span class="pre">timeOffset_collapse</span></code></a>([scene,&nbsp;timerange])</td>
+<tr class="row-even"><td><a class="reference internal" href="#Red9.core.Red9_CoreUtils.timeOffset_collapse" title="Red9.core.Red9_CoreUtils.timeOffset_collapse"><code class="xref py py-obj docutils literal"><span class="pre">timeOffset_collapse</span></code></a>([scene,&nbsp;timerange,&nbsp;mRigs])</td>
 <td>Light wrap over the TimeOffset call to manage collapsing time</td>
 </tr>
 <tr class="row-odd"><td><a class="reference internal" href="#Red9.core.Red9_CoreUtils.decodeString" title="Red9.core.Red9_CoreUtils.decodeString"><code class="xref py py-obj docutils literal"><span class="pre">decodeString</span></code></a>(val)</td>
@@ -200,6 +200,18 @@ quotes and punctuation marks are neutral.</p>
 </tr>
 </tbody>
 </table>
+</dd></dl>
+
+<dl class="function">
+<dt id="Red9.core.Red9_CoreUtils.removeNameSpace_fromDag">
+<code class="descname">removeNameSpace_fromDag</code><span class="sig-paren">(</span><em>dagpath</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.removeNameSpace_fromDag" title="Permalink to this definition">¶</a></dt>
+<dd><p>from a given DagPath remove any namespaces - used in the poseCompare to only compare the native hierarchies</p>
+<dl class="docutils">
+<dt>such that:</dt>
+<dd>&#8220;<a href="#id5"><span class="problematic" id="id6">|</span></a>test:Reference|test:Hips|test:Spine|test:Spine1|test:Spine2|test:Spine3|test:Spine4|test:Neck|test:Neck1|test:Neck2|test:Head&#8221;</dd>
+<dt>will return:</dt>
+<dd>&#8220;<a href="#id7"><span class="problematic" id="id8">|</span></a>Reference|Hips|Spine|Spine1|Spine2|Spine3|Spine4|Neck|Neck1|Neck2|Head&#8221;</dd>
+</dl>
 </dd></dl>
 
 <dl class="function">
@@ -731,7 +743,7 @@ Uses the FilterNode_Settings object for all args such that:</p>
 
 <dl class="function">
 <dt id="Red9.core.Red9_CoreUtils.getBlendTargetsFromMesh">
-<code class="descname">getBlendTargetsFromMesh</code><span class="sig-paren">(</span><em>node</em>, <em>asList=True</em>, <em>returnAll=False</em>, <em>levels=4</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.getBlendTargetsFromMesh" title="Permalink to this definition">¶</a></dt>
+<code class="descname">getBlendTargetsFromMesh</code><span class="sig-paren">(</span><em>node</em>, <em>asList=True</em>, <em>returnAll=False</em>, <em>levels=4</em>, <em>indexes=False</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.getBlendTargetsFromMesh" title="Permalink to this definition">¶</a></dt>
 <dd><p>quick func to return the blendshape targets found from a give mesh&#8217;s connected blendshape&#8217;s</p>
 <p>TODO: missing index&#8217;s used to be an issue if you&#8217;d deleted a target Maya would leave the 
 index free resulting in blank targets, doesn&#8217;t seem to do that now?? Also what do we 
@@ -745,6 +757,7 @@ return and in what format if we have multiple blendShapes on the node?</p>
 <li><strong>asList</strong> &#8211; return as a straight list of target names or a dict of data</li>
 <li><strong>returnAll</strong> &#8211; if multiple blendshapes are found do we return all, or just the first</li>
 <li><strong>levels</strong> &#8211; same as the &#8216;levels&#8217; flag in listHistory as that&#8217;s ultimately what grabs the blendShape nodes here</li>
+<li><strong>indexes</strong> &#8211; return the data as a tuple (index, plug(weight[index]), blendtarget )</li>
 </ul>
 </td>
 </tr>
@@ -792,6 +805,7 @@ that Spine==Spine or REF1:Spine==REF2:Spine  </div>
 <div class="line">* matchMethod=&#8221;stripPrefix&#8221; : Match each element by a relaxed naming convention 
 allowing for prefixes one side such that RigX_Spine == Spine</div>
 <div class="line">* matchMethod=&#8221;mirrorIndex&#8221; : Match via the nodes MirrorMarker</div>
+<div class="line">* matchMethod=&#8221;metaData&#8221; : matc the nodes based on their wiring connections to the MetaData framework</div>
 </div>
 </li>
 </ul>
@@ -946,7 +960,7 @@ in the channelBox.</p>
 <tbody valign="top">
 <tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
 <li><strong>nodes</strong> &#8211; nodes to process</li>
-<li><strong>attrs</strong> &#8211; set() of attrs</li>
+<li><strong>attrs</strong> &#8211; set() of attrs, or &#8216;all&#8217;</li>
 <li><strong>mode</strong> &#8211; &#8216;lock&#8217;, &#8216;unlock&#8217;, &#8216;hide&#8217;, &#8216;unhide&#8217;, &#8216;fullkey&#8217;, &#8216;lockall&#8217;</li>
 <li><strong>hierarchy</strong> &#8211; process all child nodes, default is now False</li>
 <li><strong>usedDefined</strong> &#8211; process all UserDefined attributes on all nodes</li>
@@ -967,7 +981,7 @@ in the channelBox.</p>
 
 <dl class="function">
 <dt id="Red9.core.Red9_CoreUtils.timeOffset_addPadding">
-<code class="descname">timeOffset_addPadding</code><span class="sig-paren">(</span><em>pad=None</em>, <em>padfrom=None</em>, <em>scene=False</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.timeOffset_addPadding" title="Permalink to this definition">¶</a></dt>
+<code class="descname">timeOffset_addPadding</code><span class="sig-paren">(</span><em>pad=None</em>, <em>padfrom=None</em>, <em>scene=False</em>, <em>mRigs=False</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.timeOffset_addPadding" title="Permalink to this definition">¶</a></dt>
 <dd><p>simple wrap of the timeoffset class which will add padding into the
 animation curves on the selected object by shifting keys</p>
 <table class="docutils field-list" frame="void" rules="none">
@@ -987,7 +1001,7 @@ animation curves on the selected object by shifting keys</p>
 
 <dl class="function">
 <dt id="Red9.core.Red9_CoreUtils.timeOffset_collapse">
-<code class="descname">timeOffset_collapse</code><span class="sig-paren">(</span><em>scene=False</em>, <em>timerange=None</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.timeOffset_collapse" title="Permalink to this definition">¶</a></dt>
+<code class="descname">timeOffset_collapse</code><span class="sig-paren">(</span><em>scene=False</em>, <em>timerange=None</em>, <em>mRigs=False</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.timeOffset_collapse" title="Permalink to this definition">¶</a></dt>
 <dd><p>Light wrap over the TimeOffset call to manage collapsing time</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -1018,7 +1032,7 @@ animation curves on the selected object by shifting keys</p>
 <span class="gp">&gt;&gt;&gt; </span>
 <span class="gp">&gt;&gt;&gt; </span><span class="c1">#build a filterSettings object up, in this case we&#39;re loading a current one.</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">flt</span><span class="o">=</span><span class="n">r9Core</span><span class="o">.</span><span class="n">FilterNode_Settings</span><span class="p">()</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">flt</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">r9Setup</span><span class="o">.</span><span class="n">red9Presets</span><span class="p">(),</span><span class="s1">&#39;Crytek_New_Meta.cfg&#39;</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">flt</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">r9Setup</span><span class="o">.</span><span class="n">red9Presets</span><span class="p">(),</span><span class="s1">&#39;Red9_DevRig.cfg&#39;</span><span class="p">))</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">flt</span><span class="o">.</span><span class="n">incRoots</span><span class="o">=</span><span class="kc">True</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">flt</span><span class="o">.</span><span class="n">printSettings</span><span class="p">()</span>
 <span class="gp">&gt;&gt;&gt; </span>
@@ -1027,7 +1041,7 @@ animation curves on the selected object by shifting keys</p>
 </div>
 <dl class="classmethod">
 <dt id="Red9.core.Red9_CoreUtils.TimeOffset.fullScene">
-<em class="property">classmethod </em><code class="descname">fullScene</code><span class="sig-paren">(</span><em>offset</em>, <em>timelines=False</em>, <em>timerange=None</em>, <em>ripple=True</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.TimeOffset.fullScene" title="Permalink to this definition">¶</a></dt>
+<em class="property">classmethod </em><code class="descname">fullScene</code><span class="sig-paren">(</span><em>offset</em>, <em>timelines=False</em>, <em>timerange=None</em>, <em>ripple=True</em>, <em>startfrm=False</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.TimeOffset.fullScene" title="Permalink to this definition">¶</a></dt>
 <dd><p>Process the entire scene and time offset all suitable nodes</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -1038,6 +1052,8 @@ animation curves on the selected object by shifting keys</p>
 <li><strong>timelines</strong> &#8211; offset the playback timelines</li>
 <li><strong>timerange</strong> &#8211; only offset times within a given timerange</li>
 <li><strong>ripple</strong> &#8211; manage the upper range of data and ripple them with the offset</li>
+<li><strong>startfrm</strong> &#8211; this turns the offset arg into a new target start frame fopr the animation, 
+calculating the offset for you such that timerange[0] starts at the offset frm value, only works if timerange is passed in</li>
 </ul>
 </td>
 </tr>
@@ -1047,7 +1063,7 @@ animation curves on the selected object by shifting keys</p>
 
 <dl class="classmethod">
 <dt id="Red9.core.Red9_CoreUtils.TimeOffset.fromSelected">
-<em class="property">classmethod </em><code class="descname">fromSelected</code><span class="sig-paren">(</span><em>offset</em>, <em>nodes=None</em>, <em>filterSettings=None</em>, <em>flocking=False</em>, <em>randomize=False</em>, <em>timerange=None</em>, <em>ripple=True</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.TimeOffset.fromSelected" title="Permalink to this definition">¶</a></dt>
+<em class="property">classmethod </em><code class="descname">fromSelected</code><span class="sig-paren">(</span><em>offset</em>, <em>nodes=None</em>, <em>filterSettings=None</em>, <em>flocking=False</em>, <em>randomize=False</em>, <em>timerange=None</em>, <em>ripple=True</em>, <em>mRigs=False</em>, <em>startfrm=False</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.TimeOffset.fromSelected" title="Permalink to this definition">¶</a></dt>
 <dd><p>Process the current selection list and offset as appropriate.</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -1056,10 +1072,14 @@ animation curves on the selected object by shifting keys</p>
 <tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
 <li><strong>offset</strong> &#8211; number of frames to offset</li>
 <li><strong>nodes</strong> &#8211; nodes to offset (or root of the filterSettings)</li>
-<li><strong>flocking</strong> &#8211; wether to sucessively increment nodes during offset</li>
-<li><strong>randomize</strong> &#8211; whether to add a ramdon factor to each succesive nodes offset</li>
+<li><strong>flocking</strong> &#8211; whether to successively increment nodes during offset</li>
+<li><strong>randomize</strong> &#8211; whether to add a random factor to each successive nodes offset</li>
 <li><strong>timerange</strong> &#8211; only offset times within a given timerange</li>
 <li><strong>ripple</strong> &#8211; manage the upper range of data and ripple them with the offset</li>
+<li><strong>mRigs</strong> &#8211; if True then the nodes used be resolved via mRig.getChildren but for all 
+mRigs wired to the given nodes</li>
+<li><strong>startfrm</strong> &#8211; this turns the offset arg into a new target start frame fopr the animation, 
+calculating the offset for you such that timerange[0] starts at the offset frm value, only works if timerange is passed in</li>
 <li><strong>filterSettings</strong> &#8211; <p>this is a FilterSettings_Node object used to pass all 
 the filter types into the FilterNode code. Internally the following is true:</p>
 <div class="line-block">
@@ -1209,8 +1229,8 @@ in that new range</p>
 
 <dl class="function">
 <dt id="Red9.core.Red9_CoreUtils.timeIsInRange">
-<code class="descname">timeIsInRange</code><span class="sig-paren">(</span><em>baseRange=()</em>, <em>testRange=()</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.timeIsInRange" title="Permalink to this definition">¶</a></dt>
-<dd><p>test that a given testRange falls within the bounds of a baseRange
+<code class="descname">timeIsInRange</code><span class="sig-paren">(</span><em>baseRange=()</em>, <em>testRange=()</em>, <em>start_inRange=True</em>, <em>end_inRange=True</em><span class="sig-paren">)</span><a class="headerlink" href="#Red9.core.Red9_CoreUtils.timeIsInRange" title="Permalink to this definition">¶</a></dt>
+<dd><p>test that a given testRange [start,end], falls within the bounds of a baseRange [start,end]
 Used to test if timeRanges fall within a baseRange</p>
 <table class="docutils field-list" frame="void" rules="none">
 <col class="field-name" />
@@ -1219,6 +1239,8 @@ Used to test if timeRanges fall within a baseRange</p>
 <tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
 <li><strong>baseRange</strong> &#8211; base time range to test against</li>
 <li><strong>testRange</strong> &#8211; range to test against the baseRange, do these times fall within the baseRange?</li>
+<li><strong>start_inRange</strong> &#8211; check is the testRange[0] value falls fully in the baseRange</li>
+<li><strong>end_inRange</strong> &#8211; check is the testRange[1] value falls fully in the baseRange</li>
 </ul>
 </td>
 </tr>
@@ -1226,8 +1248,8 @@ Used to test if timeRanges fall within a baseRange</p>
 </table>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">if you pass in baseRange as (None, 100) then we only validate against the end time.
-if we pass in baseRange as (10, None) we only validate against the start time
+<p class="last">if you pass in baseRange as (None, 100) then we only validate against the end time regardless of the flags.
+if we pass in baseRange as (10, None) we only validate against the start time regardless of the flags.
 else we validate that testRange is fully within the baseRanges times</p>
 </div>
 </dd></dl>
